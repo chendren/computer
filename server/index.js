@@ -1,0 +1,53 @@
+import express from 'express';
+import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import cors from 'cors';
+import { initStorage } from './services/storage.js';
+import { initWebSocket } from './services/websocket.js';
+import apiRoutes from './routes/api.js';
+import transcribeRoutes from './routes/transcribe.js';
+import claudeRoutes from './routes/claude.js';
+import ttsRoutes from './routes/tts.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PLUGIN_ROOT = path.resolve(__dirname, '..');
+const PORT = process.env.COMPUTER_PORT || 3141;
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.static(path.join(PLUGIN_ROOT, 'ui')));
+
+await initStorage(PLUGIN_ROOT);
+
+app.use('/api', apiRoutes);
+app.use('/api/transcribe', transcribeRoutes);
+app.use('/api/claude', claudeRoutes);
+app.use('/api/tts', ttsRoutes);
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'online',
+    system: 'USS Enterprise Computer',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// SPA fallback
+app.get('*', (req, res) => {
+  res.sendFile(path.join(PLUGIN_ROOT, 'ui', 'index.html'));
+});
+
+const server = createServer(app);
+const wss = new WebSocketServer({ server });
+initWebSocket(wss);
+
+server.listen(PORT, () => {
+  console.log(`\n  ============================`);
+  console.log(`  COMPUTER ONLINE`);
+  console.log(`  http://localhost:${PORT}`);
+  console.log(`  ============================\n`);
+});

@@ -1,0 +1,16 @@
+{
+  "description": "Computer plugin — auto-starts LCARS server on session start",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/status.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

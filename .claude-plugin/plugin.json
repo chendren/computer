@@ -1,0 +1,8 @@
+{
+  "name": "computer",
+  "version": "1.0.0",
+  "description": "Star Trek Enterprise-style AI computer with LCARS interface — voice transcription, analysis, charts, and web search",
+  "author": {
+    "name": "Chad Hendren"
+  }
+}

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>COMPUTER</title>
+  <link rel="stylesheet" href="/css/lcars.css">
+  <link rel="stylesheet" href="/css/components.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+  <div id="lcars-frame">
+    <!-- Top Bar -->
+    <header id="lcars-header">
+      <div class="lcars-bar-top">
+        <div class="lcars-elbow-top-left"></div>
+        <div class="lcars-title-bar">
+          <span class="lcars-title">USS Enterprise Computer</span>
+        </div>
+        <div class="lcars-elbow-top-right"></div>
+      </div>
+    </header>
+
+    <!-- Sidebar -->
+    <nav id="lcars-sidebar">
+      <button class="lcars-button active" data-panel="main">Main</button>
+      <button class="lcars-button" data-panel="transcript">Transcript</button>
+      <button class="lcars-button" data-panel="analysis">Analysis</button>
+      <button class="lcars-button" data-panel="charts">Charts</button>
+      <button class="lcars-button" data-panel="search">Search</button>
+      <div class="lcars-sidebar-spacer"></div>
+      <div id="status-indicators"></div>
+    </nav>
+
+    <!-- Main Content -->
+    <main id="lcars-main">
+      <!-- Main / Conversation Panel -->
+      <div id="panel-main" class="panel active">
+        <div class="conversation-display" id="conversation-display">
+          <div class="empty-state">
+            <div class="empty-state-icon">&#9670;</div>
+            <div class="empty-state-text">Computer Standing By</div>
+          </div>
+        </div>
+        <div class="command-area">
+          <input type="text" class="command-input" id="command-input" placeholder="Enter command..." autocomplete="off">
+          <button class="cmd-btn" id="cmd-send">Send</button>
+        </div>
+      </div>
+
+      <!-- Transcript Panel -->
+      <div id="panel-transcript" class="panel">
+        <div class="transcript-controls">
+          <button class="mic-btn" id="mic-btn">Start Listening</button>
+          <div class="upload-area">
+            <button class="upload-btn" id="upload-btn">Upload Audio</button>
+            <input type="file" id="audio-file-input" accept="audio/*" style="display:none">
+            <span id="upload-status" class="status-segment"></span>
+          </div>
+        </div>
+        <div class="lcars-divider"></div>
+        <div class="lcars-label">Live Transcript</div>
+        <div class="transcript-list" id="transcript-list">
+          <div class="empty-state">
+            <div class="empty-state-text">No transcripts yet</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Analysis Panel -->
+      <div id="panel-analysis" class="panel">
+        <div class="lcars-label">Analysis Results</div>
+        <div id="analysis-results" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-text">No analyses available</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts Panel -->
+      <div id="panel-charts" class="panel">
+        <div class="lcars-label">Visualizations</div>
+        <div class="chart-wrapper" id="chart-wrapper">
+          <div class="empty-state">
+            <div class="empty-state-text">No charts generated</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Search Panel -->
+      <div id="panel-search" class="panel">
+        <div class="search-bar">
+          <input type="text" class="search-input" id="search-input" placeholder="Search query..." autocomplete="off">
+          <button class="cmd-btn" id="search-btn">Search</button>
+        </div>
+        <div class="lcars-divider"></div>
+        <div class="lcars-label">Search Results</div>
+        <div class="search-results-list" id="search-results">
+          <div class="empty-state">
+            <div class="empty-state-text">Enter a query above</div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer Bar -->
+    <footer id="lcars-footer">
+      <div class="lcars-bar-bottom">
+        <div class="lcars-elbow-bottom-left"></div>
+        <div id="status-bar">
+          <span class="status-segment" id="status-connection">Connecting...</span>
+          <span class="status-segment" id="status-uptime"></span>
+          <span class="status-segment" id="status-activity"></span>
+        </div>
+        <div class="lcars-elbow-bottom-right"></div>
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
