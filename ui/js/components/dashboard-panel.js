@@ -17,6 +17,20 @@ export class DashboardPanel {
         this.render();
       });
     });
+
+    // Track gateway events
+    this.ws.on('channel_message', (data) => {
+      this.addActivity('channel', data);
+      this.render();
+    });
+    this.ws.on('cron_event', (data) => {
+      this.addActivity('cron', data);
+      this.render();
+    });
+    this.ws.on('node_event', (data) => {
+      this.addActivity('node', data);
+      this.render();
+    });
   }
 
   addActivity(type, data) {
@@ -30,17 +44,21 @@ export class DashboardPanel {
 
   async loadHistory() {
     try {
-      const [analyses, logs, monitors, knowledge] = await Promise.allSettled([
+      const [analyses, logs, monitors, knowledge, health, security] = await Promise.allSettled([
         this.api.get('/analyses'),
         this.api.get('/logs'),
         this.api.get('/monitors'),
         this.api.get('/knowledge'),
+        fetch('/api/health').then(r => r.json()),
+        fetch('/api/security/stats').then(r => r.json()),
       ]);
       this.cachedData = {
         analyses: analyses.status === 'fulfilled' ? analyses.value : [],
         logs: logs.status === 'fulfilled' ? logs.value : [],
         monitors: monitors.status === 'fulfilled' ? monitors.value : [],
         knowledge: knowledge.status === 'fulfilled' ? knowledge.value : [],
+        health: health.status === 'fulfilled' ? health.value : null,
+        security: security.status === 'fulfilled' ? security.value : null,
       };
       this.render();
     } catch {}
@@ -49,12 +67,15 @@ export class DashboardPanel {
   render() {
     if (!this.container) return;
     clearEmpty(this.container);
-    const d = this.cachedData || { analyses: [], logs: [], monitors: [], knowledge: [] };
+    const d = this.cachedData || { analyses: [], logs: [], monitors: [], knowledge: [], health: null, security: null };
 
     const activeMonitors = d.monitors.filter(m => m.status === 'active' || m.status === 'watching');
     const alertMonitors = d.monitors.filter(m => m.status === 'alert' || m.status === 'triggered');
     const recentLogs = d.logs.slice(0, 5);
     const recentAnalyses = d.analyses.slice(0, 3);
+
+    const gw = d.health?.gateway || {};
+    const sec = d.security || {};
 
     this.container.innerHTML = `
       <div class="dash-grid">
@@ -76,6 +97,26 @@ export class DashboardPanel {
             <div class="dash-stat">
               <div class="dash-stat-value">${d.knowledge.length}</div>
               <div class="dash-stat-label">Knowledge</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dash-card dash-gateway">
+          <div class="dash-card-title">Gateway</div>
+          <div class="dash-stat-row">
+            <div class="dash-stat">
+              <div class="dash-stat-value" style="color: ${gw.connected ? 'var(--lcars-green)' : gw.running ? 'var(--lcars-gold)' : 'var(--lcars-red)'}">
+                ${gw.connected ? 'ON' : gw.running ? 'RUN' : 'OFF'}
+              </div>
+              <div class="dash-stat-label">Status</div>
+            </div>
+            <div class="dash-stat">
+              <div class="dash-stat-value">${sec.totalRedactions || 0}</div>
+              <div class="dash-stat-label">Redacted</div>
+            </div>
+            <div class="dash-stat">
+              <div class="dash-stat-value">${sec.patternCount || 26}</div>
+              <div class="dash-stat-label">Patterns</div>
             </div>
           </div>
         </div>

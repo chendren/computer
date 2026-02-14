@@ -129,16 +129,37 @@ html, body {
   filter: brightness(1.3);
 }
 
-.lcars-button:nth-child(1) { background: var(--lcars-orange); }
-.lcars-button:nth-child(2) { background: var(--lcars-lavender); }
-.lcars-button:nth-child(3) { background: var(--lcars-blue); }
-.lcars-button:nth-child(4) { background: var(--lcars-light-blue); }
-.lcars-button:nth-child(5) { background: var(--lcars-peach); }
-.lcars-button:nth-child(6) { background: var(--lcars-gold); }
-.lcars-button:nth-child(7) { background: var(--lcars-rose); }
-.lcars-button:nth-child(8) { background: var(--lcars-lavender); }
-.lcars-button:nth-child(9) { background: var(--lcars-orange); }
-.lcars-button:nth-child(10) { background: var(--lcars-green); }
+/* Core group */
+.lcars-button[data-panel="dashboard"] { background: var(--lcars-orange); }
+.lcars-button[data-panel="main"] { background: var(--lcars-lavender); }
+.lcars-button[data-panel="transcript"] { background: var(--lcars-blue); }
+.lcars-button[data-panel="analysis"] { background: var(--lcars-light-blue); }
+.lcars-button[data-panel="charts"] { background: var(--lcars-peach); }
+.lcars-button[data-panel="knowledge"] { background: var(--lcars-gold); }
+/* Comms group */
+.lcars-button[data-panel="channels"] { background: var(--lcars-rose); }
+.lcars-button[data-panel="search"] { background: var(--lcars-blue); }
+.lcars-button[data-panel="log"] { background: var(--lcars-orange); }
+.lcars-button[data-panel="monitor"] { background: var(--lcars-green); }
+.lcars-button[data-panel="compare"] { background: var(--lcars-lavender); }
+/* Ops group */
+.lcars-button[data-panel="gateway"] { background: var(--lcars-light-blue); }
+.lcars-button[data-panel="plugins"] { background: var(--lcars-peach); }
+.lcars-button[data-panel="cron"] { background: var(--lcars-gold); }
+.lcars-button[data-panel="browser"] { background: var(--lcars-rose); }
+.lcars-button[data-panel="nodes"] { background: var(--lcars-blue); }
+.lcars-button[data-panel="security"] { background: var(--lcars-red); }
+
+.lcars-nav-group-label {
+  font-family: var(--lcars-font);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--lcars-text-dim);
+  padding: 8px 16px 2px;
+  margin-top: 4px;
+}
 
 .lcars-button.active {
   filter: brightness(1.4);

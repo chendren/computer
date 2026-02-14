@@ -1,8 +1,9 @@
 {
   "name": "computer-plugin",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
+    "prestart": "node scripts/build-check.js",
     "start": "node server/index.js",
     "dev": "node --watch server/index.js"
   },

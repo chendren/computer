@@ -35,5 +35,12 @@ Present as a Star Trek systems readout:
 ║ Whisper:      [path/MISSING]  ║
 ║ FFmpeg:       [path/MISSING]  ║
 ║ Node.js:      [version]       ║
+╠════════════════════════════════╣
+║ GATEWAY                       ║
+║ Status:       [ONLINE/OFFLINE]║
+║ Connected:    [YES/NO]        ║
+║ Channels:     [count]         ║
+║ Nodes:        [count]         ║
+║ Security:     [count] redacted║
 ╚════════════════════════════════╝
 ```

@@ -23,16 +23,29 @@
 
     <!-- Sidebar -->
     <nav id="lcars-sidebar">
+      <!-- Core -->
+      <div class="lcars-nav-group-label">Core</div>
       <button class="lcars-button active" data-panel="dashboard">Dashboard</button>
       <button class="lcars-button" data-panel="main">Main</button>
       <button class="lcars-button" data-panel="transcript">Transcript</button>
       <button class="lcars-button" data-panel="analysis">Analysis</button>
       <button class="lcars-button" data-panel="charts">Charts</button>
+      <button class="lcars-button" data-panel="knowledge">Knowledge</button>
+      <!-- Comms -->
+      <div class="lcars-nav-group-label">Comms</div>
+      <button class="lcars-button" data-panel="channels">Channels</button>
       <button class="lcars-button" data-panel="search">Search</button>
       <button class="lcars-button" data-panel="log">Log</button>
       <button class="lcars-button" data-panel="monitor">Monitor</button>
       <button class="lcars-button" data-panel="compare">Compare</button>
-      <button class="lcars-button" data-panel="knowledge">Knowledge</button>
+      <!-- Ops -->
+      <div class="lcars-nav-group-label">Ops</div>
+      <button class="lcars-button" data-panel="gateway">Gateway</button>
+      <button class="lcars-button" data-panel="plugins">Plugins</button>
+      <button class="lcars-button" data-panel="cron">Cron</button>
+      <button class="lcars-button" data-panel="browser">Browser</button>
+      <button class="lcars-button" data-panel="nodes">Nodes</button>
+      <button class="lcars-button" data-panel="security">Security</button>
       <div class="lcars-sidebar-spacer"></div>
       <div id="status-indicators"></div>
     </nav>
@@ -194,6 +207,91 @@
           </div>
         </div>
       </div>
+
+      <!-- ═══ New OpenClaw Integration Panels ═══ -->
+
+      <!-- Channels Panel -->
+      <div id="panel-channels" class="panel">
+        <div class="lcars-label">Communications Array</div>
+        <div id="channels-content" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-icon">&#9670;</div>
+            <div class="empty-state-text">Loading channels...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Gateway Panel -->
+      <div id="panel-gateway" class="panel">
+        <div class="lcars-label">Gateway Control</div>
+        <div id="gateway-content" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-icon">&#9670;</div>
+            <div class="empty-state-text">Loading gateway status...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Plugins Panel -->
+      <div id="panel-plugins" class="panel">
+        <div class="lcars-label">Plugin Registry</div>
+        <div id="plugins-content" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-icon">&#9670;</div>
+            <div class="empty-state-text">Loading plugins...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cron Panel -->
+      <div id="panel-cron" class="panel">
+        <div class="lcars-label">Temporal Operations</div>
+        <div id="cron-content" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-icon">&#9670;</div>
+            <div class="empty-state-text">Loading scheduled tasks...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Browser Panel -->
+      <div id="panel-browser" class="panel">
+        <div class="browser-controls">
+          <input type="text" class="search-input" id="browser-url-input" placeholder="Enter URL..." autocomplete="off">
+          <button class="cmd-btn" id="browser-go-btn">Navigate</button>
+        </div>
+        <div class="lcars-divider"></div>
+        <div class="lcars-label">Viewscreen</div>
+        <div id="browser-content" style="flex:1; overflow-y:auto;">
+          <div class="browser-viewport">
+            <div class="empty-state">
+              <div class="empty-state-text">Enter a URL to navigate</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nodes Panel -->
+      <div id="panel-nodes" class="panel">
+        <div class="lcars-label">Connected Nodes</div>
+        <div id="nodes-content" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-icon">&#9670;</div>
+            <div class="empty-state-text">Loading nodes...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Security Panel -->
+      <div id="panel-security" class="panel">
+        <div class="lcars-label">Security Operations</div>
+        <div id="security-content" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-icon">&#9670;</div>
+            <div class="empty-state-text">Loading security status...</div>
+          </div>
+        </div>
+      </div>
     </main>
 
     <!-- Footer Bar -->
@@ -202,6 +300,7 @@
         <div class="lcars-elbow-bottom-left"></div>
         <div id="status-bar">
           <span class="status-segment" id="status-connection">Connecting...</span>
+          <span class="status-segment" id="status-gateway"></span>
           <span class="status-segment" id="status-uptime"></span>
           <span class="status-segment" id="status-activity"></span>
         </div>

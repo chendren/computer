@@ -32,6 +32,9 @@ You are the Monitoring Division of the USS Enterprise Computer system. You set u
 - **Endpoint Monitor**: API health checks with response validation
 - **Process Monitor**: Check if a process is running, CPU/memory usage
 - **Log Monitor**: Tail a log file for patterns or errors
+- **Channel Monitor**: Watch messaging channel health and connectivity
+- **Gateway Monitor**: Track gateway process status and WebSocket connection
+- **Node Monitor**: Monitor connected device nodes for availability
 
 ## Output
 

@@ -13,6 +13,14 @@ import { MonitorPanel } from './components/monitor-panel.js';
 import { ComparisonPanel } from './components/comparison-panel.js';
 import { DashboardPanel } from './components/dashboard-panel.js';
 import { KnowledgePanel } from './components/knowledge-panel.js';
+// OpenClaw integration panels
+import { ChannelsPanel } from './components/channels-panel.js';
+import { GatewayPanel } from './components/gateway-panel.js';
+import { PluginsPanel } from './components/plugins-panel.js';
+import { CronPanel } from './components/cron-panel.js';
+import { BrowserPanel } from './components/browser-panel.js';
+import { NodesPanel } from './components/nodes-panel.js';
+import { SecurityPanel } from './components/security-panel.js';
 
 class ComputerApp {
   constructor() {
@@ -35,6 +43,15 @@ class ComputerApp {
     this.command.audioPlayer = this.audio;
     this.dashboard = new DashboardPanel(this.api, this.ws);
     this.voice = new VoiceInput(this.transcript, this.statusBar, this.ws, this.command);
+
+    // OpenClaw integration panels
+    this.channels = new ChannelsPanel(this.api, this.ws);
+    this.gateway = new GatewayPanel(this.api, this.ws);
+    this.plugins = new PluginsPanel(this.api, this.ws);
+    this.cron = new CronPanel(this.api, this.ws);
+    this.browser = new BrowserPanel(this.api, this.ws);
+    this.nodes = new NodesPanel(this.api, this.ws);
+    this.security = new SecurityPanel(this.api, this.ws);
 
     // WebSocket handlers — auto-switch to relevant panel on data push
     this.ws.on('transcript', (data) => {
@@ -91,6 +108,15 @@ class ComputerApp {
       }
     });
 
+    // Gateway status updates for footer
+    this.ws.on('gateway_status', (data) => {
+      const el = document.getElementById('status-gateway');
+      if (el) {
+        el.textContent = data.connected ? 'Gateway: Online' : 'Gateway: Offline';
+        el.className = `status-segment ${data.connected ? 'status-online' : 'status-offline'}`;
+      }
+    });
+
     // Panel switching via sidebar buttons
     const buttons = document.querySelectorAll('.lcars-button[data-panel]');
     buttons.forEach(btn => {
@@ -135,6 +161,13 @@ class ComputerApp {
       this.comparison.loadHistory(this.api),
       this.knowledge.loadHistory(),
       this.dashboard.loadHistory(),
+      // OpenClaw panels — non-fatal if gateway unavailable
+      this.channels.loadHistory(),
+      this.gateway.loadHistory(),
+      this.plugins.loadHistory(),
+      this.cron.loadHistory(),
+      this.nodes.loadHistory(),
+      this.security.loadHistory(),
     ]);
   }
 }
