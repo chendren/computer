@@ -23,24 +23,21 @@ export class PluginsPanel {
 
   async loadPlugins() {
     try {
-      const res = await fetch('/api/gateway/plugins');
-      const data = await res.json();
+      const data = await this.api.get('/gateway/plugins');
       this.plugins = data.plugins || [];
     } catch { this.plugins = []; }
   }
 
   async loadHooks() {
     try {
-      const res = await fetch('/api/gateway/hooks');
-      const data = await res.json();
+      const data = await this.api.get('/gateway/hooks');
       this.hooks = data.hooks || [];
     } catch { this.hooks = []; }
   }
 
   async loadTools() {
     try {
-      const res = await fetch('/api/gateway/tools');
-      const data = await res.json();
+      const data = await this.api.get('/gateway/tools');
       this.tools = data.tools || [];
     } catch { this.tools = []; }
   }

@@ -3,3 +3,17 @@ data/
 package-lock.json
 *.log
 .DS_Store
+
+# VAD/ONNX browser libs (copied from node_modules via postinstall)
+ui/lib/
+
+# Security — never commit secrets or credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*
+secrets*
+data/.auth-token

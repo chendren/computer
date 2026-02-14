@@ -3,9 +3,13 @@ import fs from 'fs/promises';
 import path from 'path';
 import { generateId } from '../utils/helpers.js';
 
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
 const TTS_PATH = '/opt/homebrew/bin/tts';
 const TTS_MODEL = 'tts_models/en/ljspeech/vits';
-const TTS_OUTPUT_DIR = '/tmp/computer-tts';
+const TTS_OUTPUT_DIR = path.join(PLUGIN_ROOT, 'data', 'tts-cache');
 
 // Ensure output directory exists
 await fs.mkdir(TTS_OUTPUT_DIR, { recursive: true });
@@ -38,7 +42,7 @@ async function _generate(text) {
       if (code === 0) {
         resolve({ id, path: outPath, filename: `${id}.wav` });
       } else {
-        reject(new Error(`TTS failed: ${stderr.slice(-500)}`));
+        reject(new Error('TTS synthesis failed'));
       }
     });
     proc.on('error', reject);

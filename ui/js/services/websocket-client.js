@@ -41,6 +41,13 @@ export class WebSocketClient {
     if (list) list.forEach(fn => fn(data));
   }
 
+  setUrl(newUrl) {
+    this.url = newUrl;
+    if (this.ws) {
+      this.ws.close();
+    }
+  }
+
   send(type, data) {
     if (this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type, data }));

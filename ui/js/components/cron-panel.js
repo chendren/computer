@@ -16,8 +16,7 @@ export class CronPanel {
 
   async loadHistory() {
     try {
-      const res = await fetch('/api/gateway/cron');
-      const data = await res.json();
+      const data = await this.api.get('/gateway/cron');
       this.jobs = data.jobs || [];
       this.render();
     } catch {

@@ -9,6 +9,7 @@ import { spawn } from 'child_process';
 import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { redactString } from '../middleware/security.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLAWDBOT_ROOT = path.resolve(__dirname, '..', '..', '..', '..', 'clawdbot');
@@ -40,9 +41,6 @@ export async function startGateway(options = {}) {
   gatewayToken = options.token || process.env.OPENCLAW_GATEWAY_TOKEN || null;
 
   const args = ['gateway', 'run', '--port', String(gatewayPort)];
-  if (gatewayToken) {
-    args.push('--token', gatewayToken);
-  }
 
   const env = {
     ...process.env,
@@ -65,14 +63,14 @@ export async function startGateway(options = {}) {
   gatewayProcess.stdout.on('data', (data) => {
     const lines = data.toString().split('\n').filter(Boolean);
     for (const line of lines) {
-      console.log('[gateway] %s', line);
+      console.log('[gateway] %s', redactString(line));
     }
   });
 
   gatewayProcess.stderr.on('data', (data) => {
     const lines = data.toString().split('\n').filter(Boolean);
     for (const line of lines) {
-      console.error('[gateway] %s', line);
+      console.error('[gateway] %s', redactString(line));
     }
   });
 

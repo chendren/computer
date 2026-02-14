@@ -26,5 +26,9 @@ export function notifyComplete(title, message) {
 }
 
 function escape(str) {
-  return String(str).replace(/"/g, '\\"').replace(/\n/g, ' ');
+  return String(str)
+    .slice(0, 500)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/[\x00-\x1f\x7f]/g, ' ');
 }

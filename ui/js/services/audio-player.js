@@ -4,6 +4,7 @@ export class AudioPlayer {
     this.playing = false;
     this.enabled = true;
     this.currentAudio = null;
+    this.onPlaybackEnd = null; // callback when all audio finishes
   }
 
   async speak(audioUrl) {
@@ -17,6 +18,7 @@ export class AudioPlayer {
   _playNext() {
     if (this.queue.length === 0) {
       this.playing = false;
+      if (this.onPlaybackEnd) this.onPlaybackEnd();
       return;
     }
 
@@ -36,6 +38,20 @@ export class AudioPlayer {
       this.currentAudio = null;
       this._playNext();
     });
+  }
+
+  /**
+   * Immediately stop all audio playback and clear the queue.
+   * Triggers onPlaybackEnd callback.
+   */
+  interrupt() {
+    this.queue = [];
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio = null;
+    }
+    this.playing = false;
+    if (this.onPlaybackEnd) this.onPlaybackEnd();
   }
 
   stop() {

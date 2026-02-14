@@ -49,8 +49,8 @@ export class DashboardPanel {
         this.api.get('/logs'),
         this.api.get('/monitors'),
         this.api.get('/knowledge'),
-        fetch('/api/health').then(r => r.json()),
-        fetch('/api/security/stats').then(r => r.json()),
+        this.api.get('/health'),
+        this.api.get('/security/stats'),
       ]);
       this.cachedData = {
         analyses: analyses.status === 'fulfilled' ? analyses.value : [],

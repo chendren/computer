@@ -6,6 +6,7 @@ A Claude Code plugin that brings the USS Enterprise computer to life. Combines C
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-CC99CC?style=flat-square&labelColor=000000)
 ![Node.js](https://img.shields.io/badge/Node.js-Express%20%2B%20WebSocket-9999FF?style=flat-square&labelColor=000000)
 ![LanceDB](https://img.shields.io/badge/Vector%20DB-LanceDB-55CC55?style=flat-square&labelColor=000000)
+![Voice Assistant](https://img.shields.io/badge/Voice-Always%20Listening-CC4444?style=flat-square&labelColor=000000)
 ![OpenClaw](https://img.shields.io/badge/Gateway-OpenClaw-FFCC00?style=flat-square&labelColor=000000)
 
 ---
@@ -83,7 +84,18 @@ When the OpenClaw gateway is available, Computer manages it as a supervised subp
 
 ## Features
 
-### Voice Input & Output
+### Always-Listening Voice Assistant
+- **Wake word activation** — Say "Computer" (or "Hey Computer") followed by a command. Always-on listening via browser microphone with Silero VAD (Voice Activity Detection) running in-browser via ONNX Runtime WebAssembly
+- **Claude Haiku tool use** — Voice commands are processed by Claude Haiku 4.5 with an agentic tool loop (15 tools) that can search the web, generate charts, switch panels, store knowledge, send messages, and more
+- **Speech-to-speech** — Full pipeline: VAD detects speech → Whisper STT transcribes → wake word regex match → Claude Haiku processes with tools → Coqui TTS speaks response → audio plays in browser
+- **Interruption support** — Speak during TTS playback to interrupt and issue a new command. VAD pauses during playback to prevent feedback loops
+- **Visual state indicator** — Diamond button in title bar with color-coded states: amber pulse (listening), bright amber (capturing), red pulse (thinking), green pulse (speaking)
+- **15 voice tools** — search_knowledge, store_knowledge, create_log, display_on_screen, send_message, list_channels, get_status, search_transcripts, create_monitor, get_briefing, generate_chart, browse_url, analyze_text, web_search, web_fetch
+- **Web search & fetch** — DuckDuckGo search integration and URL fetching with intelligent HTML-to-text extraction for real-time data lookups
+- **Date-aware** — System prompt includes current date/time for accurate time-relative queries ("last week", "past 3 days")
+- **Session memory** — Per-WebSocket conversation history (20 turns, 30min TTL) for multi-turn voice interactions
+
+### Voice Input & Output (Manual Mode)
 - **Real-time speech-to-text** — Browser records 3-second audio chunks via MediaRecorder, sends them over WebSocket as binary frames, server transcribes each chunk locally using OpenAI Whisper (`tiny` model for low latency)
 - **File-based transcription** — Upload audio files (mp3, wav, m4a, ogg, flac, webm, mp4) for full transcription using Whisper (`base` model for accuracy)
 - **Multi-provider TTS** — Gateway-first provider cascade (ElevenLabs, OpenAI, Google TTS) with local Coqui TTS fallback
@@ -151,9 +163,10 @@ When the OpenClaw gateway is available, Computer manages it as a supervised subp
 │              Express + WebSocket Server (:3141)               │
 │                                                               │
 │  Security Middleware         WebSocket Server                  │
-│  ├── Scans POST/PUT/PATCH   ├── Binary frames → Whisper STT  │
-│  ├── 26 secret patterns     ├── broadcast() to all clients   │
-│  ├── Sensitive field names   ├── Gateway event forwarding     │
+│  ├── Bearer token auth       ├── Binary frames → Whisper STT  │
+│  ├── Scans POST/PUT/PATCH   ├── Voice protocol (15 tools)    │
+│  ├── 26 secret patterns     ├── Claude Haiku agentic loop    │
+│  ├── Sensitive field names   ├── Web search + fetch           │
 │  └── Redacts → [REDACTED]   └── Heartbeat every 30s          │
 │                                                               │
 │  REST API                    Services                         │
@@ -162,6 +175,7 @@ When the OpenClaw gateway is available, Computer manages it as a supervised subp
 │  ├── /api/tts/*              ├── config-bridge.js             │
 │  ├── /api/claude/*           ├── vectordb.js → LanceDB        │
 │  ├── /api/media/*            ├── embeddings.js → Ollama       │
+│  ├── /api/voice/*            ├── voice-assistant.js → Haiku   │
 │  ├── /api/gateway/*          ├── storage.js → JSON files      │
 │  │   ├── status, restart     ├── transcription.js → Whisper   │
 │  │   ├── channels, send      ├── tts.js → Coqui TTS          │
@@ -236,12 +250,13 @@ When the OpenClaw gateway is available, Computer manages it as a supervised subp
 
 | Tool | Purpose | Install |
 |------|---------|---------|
+| **ANTHROPIC_API_KEY** | Voice assistant (Claude Haiku) | [console.anthropic.com](https://console.anthropic.com) |
 | **OpenAI Whisper** | Local speech-to-text | `pip install openai-whisper` |
 | **Coqui TTS** | Local text-to-speech | `pip install TTS` |
 | **FFmpeg** | Audio format conversion | `brew install ffmpeg` |
 | **OpenClaw (clawdbot)** | 21-channel gateway + browser + cron | `git clone` + `pnpm build` in `~/clawdbot/` |
 
-Whisper is expected at `/opt/homebrew/bin/whisper` and TTS at `/opt/homebrew/bin/tts`. OpenClaw gateway is optional — Computer degrades gracefully without it.
+Whisper is expected at `/opt/homebrew/bin/whisper` and TTS at `/opt/homebrew/bin/tts`. OpenClaw gateway is optional — Computer degrades gracefully without it. The voice assistant requires `ANTHROPIC_API_KEY` for Claude Haiku processing.
 
 ---
 
@@ -378,7 +393,27 @@ The LCARS interface has 19 panels organized in three groups:
 
 ### Voice Interaction
 
-#### Speaking to the Computer (STT)
+#### Always-Listening Mode (Recommended)
+
+1. Open the LCARS UI in your browser
+2. Click the **diamond button** (◆) in the title bar — it pulses amber
+3. Say **"Computer, what is the system status?"** — the button turns bright amber (capturing), then red (thinking)
+4. The Computer speaks the response — button turns green (speaking)
+5. After the response finishes, it returns to amber (listening) for the next command
+6. Click the button again to deactivate
+
+**Voice command flow:**
+```
+[Always-on mic] → [Silero VAD detects speech] → [Whisper STT transcribes]
+  → [Client checks for "Computer" wake word] → [Claude Haiku + 15 tools]
+  → [Tool execution (web search, charts, panels, etc.)]
+  → [Coqui TTS generates audio] → [Browser plays response]
+  → [Return to listening]
+```
+
+**Interruption:** Speak during TTS playback to stop it and issue a new command.
+
+#### Manual Mode (Transcript Panel)
 
 1. Open the Transcript panel in the browser
 2. Click **Start Listening** — the browser requests microphone access
@@ -392,7 +427,7 @@ The LCARS interface has 19 panels organized in three groups:
 
 - **Gateway TTS (preferred)** — ElevenLabs, OpenAI, Google Cloud TTS via gateway
 - **Local Coqui TTS (fallback)** — `tts_models/en/ljspeech/vits` — fast English model with ~0.2s generation time
-- Responses under 200 characters are spoken aloud; longer responses are displayed only
+- Voice assistant responses are always spoken; manual mode responses under 200 characters are spoken
 
 ### Smart Voice Routing
 
@@ -556,6 +591,11 @@ Connect to `ws://localhost:3141`. All events use JSON format: `{ "type": "<event
 | `comparison` | Comparison result | `{ id, subjects, diffs, verdict }` |
 | `knowledge` | Knowledge entry ingested | `{ id, title, chunk_count }` |
 | `stt_result` | Audio chunk transcribed | `{ text }` |
+| `voice_thinking` | Voice assistant processing | `{}` |
+| `voice_response` | Voice assistant response | `{ text, audioUrl, toolsUsed, panelSwitch }` |
+| `voice_done` | Voice turn complete | `{}` |
+| `voice_error` | Voice processing error | `{ error }` |
+| `voice_panel_switch` | Voice-triggered panel switch | `{ panel }` |
 | `channel_message` | Message on any channel | `{ channel, from, text, timestamp }` |
 | `gateway_status` | Gateway connection change | `{ connected }` |
 | `gateway_presence` | Gateway presence update | `{ nodes, sessions }` |
@@ -681,6 +721,7 @@ The `/api/tts/providers` and `/api/transcribe/providers` endpoints list all avai
 
 | File | Purpose |
 |------|---------|
+| `server/middleware/auth.js` | Bearer token authentication — auto-generated 256-bit token, required on all /api/* routes |
 | `server/middleware/security.js` | Secret redaction: 26 regex patterns + sensitive field name detection |
 
 ### Routes
@@ -693,6 +734,7 @@ The `/api/tts/providers` and `/api/transcribe/providers` endpoints list all avai
 | `server/routes/transcribe.js` | Audio transcription with gateway-first STT cascade |
 | `server/routes/tts.js` | Text-to-speech with gateway-first TTS cascade |
 | `server/routes/media.js` | Media upload + AI analysis via gateway vision models |
+| `server/routes/voice.js` | Voice assistant config/status endpoints |
 | `server/routes/gateway-extras.js` | Sessions, agents, hooks, tools, nodes, OAuth, inbox/threads, channel config, TTS/STT providers |
 
 ### Services
@@ -710,7 +752,8 @@ The `/api/tts/providers` and `/api/transcribe/providers` endpoints list all avai
 | `server/services/transcription.js` | Whisper CLI wrapper |
 | `server/services/tts.js` | Coqui TTS with sequential queue |
 | `server/services/claude-bridge.js` | Spawns `claude -p` child processes |
-| `server/services/websocket.js` | WebSocket manager with binary audio handling |
+| `server/services/voice-assistant.js` | Claude Haiku 4.5 with 15 tools, agentic loop, per-session conversation history |
+| `server/services/websocket.js` | WebSocket manager with binary audio, voice protocol, tool executor |
 | `server/services/notifications.js` | macOS desktop notifications via osascript |
 
 ---
@@ -752,7 +795,14 @@ All UI code is vanilla JavaScript using ES module imports. No build step require
 | `api-client.js` | REST client: `get()`, `post()`, `delete()`, `uploadFile()`, `queryClaudeStream()` |
 | `websocket-client.js` | WebSocket with auto-reconnect, binary send, event dispatch |
 | `speech-service.js` | MediaRecorder → WebSocket → Whisper STT pipeline |
-| `audio-player.js` | Queue-based TTS audio playback |
+| `audio-player.js` | Queue-based TTS audio playback with interrupt support |
+| `vad-service.js` | Silero VAD wrapper: mic access, speech detection, Float32→WAV conversion |
+
+#### Voice Assistant Component
+
+| File | Purpose |
+|------|---------|
+| `voice-assistant-ui.js` | State machine: IDLE → LISTENING → CAPTURING → PROCESSING → THINKING → SPEAKING. Wake word detection, VAD orchestration, WS protocol |
 
 ### CSS Design System
 
@@ -921,6 +971,7 @@ data/
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `COMPUTER_PORT` | `3141` | Server port |
+| `ANTHROPIC_API_KEY` | (none) | Required for voice assistant (Claude Haiku 4.5) |
 
 ### Hardcoded Paths
 
@@ -982,7 +1033,7 @@ Commands use the `computer:` prefix: `/computer:analyze` (not `/computer-analyze
 ~/.claude/plugins/computer/
 ├── .claude-plugin/
 │   └── plugin.json
-├── package.json                       # v2.0.0 — express, ws, @lancedb/lancedb, openclaw
+├── package.json                       # v3.0.0 — express, ws, @lancedb/lancedb, @anthropic-ai/sdk, vad-web
 ├── README.md
 │
 ├── commands/                          # 17 slash commands
@@ -1004,11 +1055,13 @@ Commands use the `computer:` prefix: `/computer:analyze` (not `/computer-analyze
 │
 ├── hooks/hooks.json                   # SessionStart auto-start
 ├── scripts/
-│   ├── start.sh, status.sh, build-check.js
+│   ├── start.sh, status.sh, build-check.js, setup-vad-libs.js
 │
 ├── server/
 │   ├── index.js                       # Express + WS + Gateway init
-│   ├── middleware/security.js         # 26 redaction patterns
+│   ├── middleware/
+│   │   ├── auth.js                   # Bearer token authentication
+│   │   └── security.js               # 26 redaction patterns
 │   ├── routes/
 │   │   ├── api.js, knowledge.js, claude.js
 │   │   ├── transcribe.js, tts.js     # Gateway-first cascades
@@ -1021,8 +1074,11 @@ Commands use the `computer:` prefix: `/computer:analyze` (not `/computer-analyze
 │   │   ├── vectordb.js, embeddings.js, chunking.js, search.js
 │   │   ├── storage.js, claude-bridge.js
 │   │   ├── transcription.js, tts.js
+│   │   ├── voice-assistant.js         # Claude Haiku + 15 tools + agentic loop
 │   │   ├── websocket.js, notifications.js
-│   └── utils/helpers.js
+│   └── utils/
+│       ├── helpers.js
+│       └── sanitize.js               # Input sanitization
 │
 ├── ui/
 │   ├── index.html                     # SPA with 19 LCARS panels
@@ -1040,10 +1096,12 @@ Commands use the `computer:` prefix: `/computer:analyze` (not `/computer-analyze
 │       │   ├── gateway-panel.js, plugins-panel.js
 │       │   ├── cron-panel.js, browser-panel.js
 │       │   ├── nodes-panel.js, security-panel.js
-│       │   ├── voice-input.js, status-bar.js
+│       │   ├── voice-input.js, voice-assistant-ui.js
+│       │   └── status-bar.js
 │       ├── services/
 │       │   ├── api-client.js, websocket-client.js
 │       │   ├── speech-service.js, audio-player.js
+│       │   └── vad-service.js         # Silero VAD wrapper
 │       └── utils/
 │           ├── formatters.js, lcars-helpers.js
 │

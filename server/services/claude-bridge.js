@@ -8,7 +8,6 @@ export function queryClaude(prompt, systemPrompt) {
     }
 
     const proc = spawn('claude', args, {
-      shell: true,
       env: { ...process.env, CLAUDECODE: '' },
     });
 
@@ -35,7 +34,6 @@ export function queryClaudeStreaming(prompt, systemPrompt, onChunk, onDone) {
   }
 
   const proc = spawn('claude', args, {
-    shell: true,
     env: { ...process.env, CLAUDECODE: '' },
   });
 

@@ -28,8 +28,17 @@ async function listItems(subdir) {
   }
 }
 
+function validateStoragePath(filePath) {
+  const resolvedData = path.resolve(dataDir);
+  const resolvedFile = path.resolve(filePath);
+  if (!resolvedFile.startsWith(resolvedData + path.sep)) {
+    throw new Error('Invalid path: access denied');
+  }
+}
+
 async function getItem(subdir, id) {
   const filePath = path.join(dataDir, subdir, `${id}.json`);
+  validateStoragePath(filePath);
   const content = await fs.readFile(filePath, 'utf-8');
   return JSON.parse(content);
 }
@@ -41,6 +50,7 @@ async function saveItem(subdir, data) {
     ...data,
   };
   const filePath = path.join(dataDir, subdir, `${item.id}.json`);
+  validateStoragePath(filePath);
   await fs.writeFile(filePath, JSON.stringify(item, null, 2));
   return item;
 }

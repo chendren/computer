@@ -26,8 +26,7 @@ export class GatewayPanel {
 
   async loadHistory() {
     try {
-      const res = await fetch('/api/gateway/status');
-      this.status = await res.json();
+      this.status = await this.api.get('/gateway/status');
     } catch {
       this.status = null;
     }
@@ -41,24 +40,21 @@ export class GatewayPanel {
 
   async loadSessions() {
     try {
-      const res = await fetch('/api/gateway/sessions');
-      const data = await res.json();
+      const data = await this.api.get('/gateway/sessions');
       this.sessions = Array.isArray(data.sessions) ? data.sessions : [];
     } catch { this.sessions = []; }
   }
 
   async loadAgents() {
     try {
-      const res = await fetch('/api/gateway/agents');
-      const data = await res.json();
+      const data = await this.api.get('/gateway/agents');
       this.agents = data.agents || [];
     } catch { this.agents = []; }
   }
 
   async loadModels() {
     try {
-      const res = await fetch('/api/gateway/models');
-      const data = await res.json();
+      const data = await this.api.get('/gateway/models');
       this.models = data.models || [];
     } catch { this.models = []; }
   }
@@ -78,7 +74,7 @@ export class GatewayPanel {
 
   async restart() {
     try {
-      await fetch('/api/gateway/restart', { method: 'POST' });
+      await this.api.post('/gateway/restart');
       setTimeout(() => this.loadHistory(), 5000);
     } catch (err) {
       console.error('Gateway restart failed:', err);
@@ -92,8 +88,8 @@ export class GatewayPanel {
     this.render();
     try {
       const [histRes, costRes] = await Promise.allSettled([
-        fetch(`/api/gateway/sessions/${encodeURIComponent(sessionKey)}/history`).then(r => r.json()),
-        fetch(`/api/gateway/sessions/${encodeURIComponent(sessionKey)}/cost`).then(r => r.json()),
+        this.api.get(`/gateway/sessions/${encodeURIComponent(sessionKey)}/history`),
+        this.api.get(`/gateway/sessions/${encodeURIComponent(sessionKey)}/cost`),
       ]);
       this.sessionHistory = histRes.status === 'fulfilled' ? histRes.value.history : null;
       this.sessionCost = costRes.status === 'fulfilled' ? costRes.value.cost : null;
@@ -103,7 +99,7 @@ export class GatewayPanel {
 
   async resetSession(sessionKey) {
     try {
-      await fetch(`/api/gateway/sessions/${encodeURIComponent(sessionKey)}/reset`, { method: 'POST' });
+      await this.api.post(`/gateway/sessions/${encodeURIComponent(sessionKey)}/reset`);
       this.selectedSession = null;
       this.sessionHistory = null;
       this.loadSessions();

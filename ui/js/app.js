@@ -21,6 +21,7 @@ import { CronPanel } from './components/cron-panel.js';
 import { BrowserPanel } from './components/browser-panel.js';
 import { NodesPanel } from './components/nodes-panel.js';
 import { SecurityPanel } from './components/security-panel.js';
+import { VoiceAssistantUI } from './components/voice-assistant-ui.js';
 
 class ComputerApp {
   constructor() {
@@ -52,6 +53,9 @@ class ComputerApp {
     this.browser = new BrowserPanel(this.api, this.ws);
     this.nodes = new NodesPanel(this.api, this.ws);
     this.security = new SecurityPanel(this.api, this.ws);
+
+    // Voice assistant (always-listening, wake word "Computer")
+    this.voiceAssistant = new VoiceAssistantUI(this.ws, this.audio, this.statusBar);
 
     // WebSocket handlers — auto-switch to relevant panel on data push
     this.ws.on('transcript', (data) => {
@@ -123,15 +127,32 @@ class ComputerApp {
       btn.addEventListener('click', () => this.switchPanel(btn.dataset.panel));
     });
 
-    // Load stored data
-    this.loadHistory();
+    // Auth first, then load data
+    this._initAuth(wsProtocol).then(() => this.loadHistory());
+  }
+
+  async _initAuth(wsProtocol) {
+    try {
+      const res = await fetch('/api/health');
+      const data = await res.json();
+      if (data.authToken) {
+        this.authToken = data.authToken;
+        this.api.setAuthToken(data.authToken);
+        // Reconnect WS with auth token
+        this.ws.setUrl(`${wsProtocol}//${location.host}?token=${data.authToken}`);
+      }
+    } catch {
+      // Health endpoint unreachable — will retry on reconnect
+    }
   }
 
   async _speak(text) {
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (this.authToken) headers['Authorization'] = `Bearer ${this.authToken}`;
       const res = await fetch('/api/tts/speak', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ text }),
       });
       const result = await res.json();

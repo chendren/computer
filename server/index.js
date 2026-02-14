@@ -4,6 +4,8 @@ import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { initStorage } from './services/storage.js';
 import { initVectorDB } from './services/vectordb.js';
 import { initWebSocket } from './services/websocket.js';
@@ -14,7 +16,9 @@ import claudeRoutes from './routes/claude.js';
 import ttsRoutes from './routes/tts.js';
 import mediaRoutes from './routes/media.js';
 import gatewayExtrasRoutes from './routes/gateway-extras.js';
-import { securityScan, getSecurityStats } from './middleware/security.js';
+import voiceRoutes from './routes/voice.js';
+import { securityScan, responseScan, getSecurityStats } from './middleware/security.js';
+import { initAuth, getAuthToken, requireAuth } from './middleware/auth.js';
 import {
   startGateway,
   stopGateway,
@@ -35,16 +39,66 @@ const PLUGIN_ROOT = path.resolve(__dirname, '..');
 const PORT = process.env.COMPUTER_PORT || 3141;
 
 const app = express();
-app.use(cors());
+
+// Security headers (CSP, X-Frame-Options, etc.)
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", "blob:", "https://cdn.jsdelivr.net"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      connectSrc: ["'self'", `ws://localhost:${PORT}`, `ws://127.0.0.1:${PORT}`, "blob:", "https://cdn.jsdelivr.net"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      objectSrc: ["'none'"],
+      workerSrc: ["'self'", "blob:"],
+      mediaSrc: ["'self'", "blob:"],
+      baseUri: ["'self'"],
+    },
+  },
+}));
+
+// CORS: only allow same-origin (LCARS UI)
+app.use(cors({
+  origin: [`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`],
+}));
+
+// General rate limit: 200 req/min
+app.use(rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please wait.' },
+}));
+
 app.use(express.json({ limit: '10mb' }));
 
 // Security: scan all POST/PUT/PATCH bodies for tokens, keys, passwords
 app.use(securityScan);
 
-app.use(express.static(path.join(PLUGIN_ROOT, 'ui')));
+// Security: scan all outgoing JSON responses for leaked secrets
+app.use(responseScan);
+
+// Authentication: require bearer token on all /api/* routes
+app.use(requireAuth);
+
+app.use(express.static(path.join(PLUGIN_ROOT, 'ui'), {
+  setHeaders: (res, filePath) => {
+    // Ensure .mjs files get correct MIME type for ONNX Runtime
+    if (filePath.endsWith('.mjs')) {
+      res.setHeader('Content-Type', 'application/javascript');
+    }
+    // Ensure .wasm files get correct MIME type
+    if (filePath.endsWith('.wasm')) {
+      res.setHeader('Content-Type', 'application/wasm');
+    }
+  },
+}));
 
 await initStorage(PLUGIN_ROOT);
 await initVectorDB(PLUGIN_ROOT);
+await initAuth(PLUGIN_ROOT);
 
 // Initialize OpenClaw integration (non-fatal if unavailable)
 let gatewayEnabled = false;
@@ -64,19 +118,29 @@ try {
   console.warn('[computer] OpenClaw integration failed:', err.message);
 }
 
+// Stricter rate limit for sensitive endpoints
+const sensitiveLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Rate limit exceeded on sensitive endpoint.' },
+});
+
 app.use('/api/knowledge', knowledgeRoutes);
 app.use('/api', apiRoutes);
 app.use('/api/transcribe', transcribeRoutes);
-app.use('/api/claude', claudeRoutes);
+app.use('/api/claude', sensitiveLimit, claudeRoutes);
 app.use('/api/tts', ttsRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/gateway', gatewayExtrasRoutes);
+app.use('/api/voice', voiceRoutes);
 
 app.get('/api/health', async (req, res) => {
   const { isOllamaAvailable } = await import('./services/embeddings.js');
   const gwStatus = getGatewayStatus();
   const clientStatus = getClientStatus();
-  res.json({
+  const response = {
     status: 'online',
     system: 'USS Enterprise Computer',
     uptime: process.uptime(),
@@ -91,7 +155,13 @@ app.get('/api/health', async (req, res) => {
       port: gwStatus.port,
       uptime: gwStatus.uptime,
     },
-  });
+  };
+  // Provide auth token to same-origin UI (CORS blocks cross-origin access)
+  const origin = req.get('origin') || '';
+  if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+    response.authToken = getAuthToken();
+  }
+  res.json(response);
 });
 
 app.get('/api/security/stats', (req, res) => {
@@ -116,14 +186,28 @@ app.post('/api/gateway/restart', async (req, res) => {
     setTimeout(() => connectToGateway(), 3000);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    res.status(500).json({ ok: false, error: 'Gateway restart failed' });
   }
 });
 
-app.post('/api/gateway/rpc', async (req, res) => {
+// RPC method allowlist — only permit known safe methods
+const ALLOWED_RPC_PREFIXES = [
+  'channels.', 'sessions.', 'models.', 'agents.', 'hooks.', 'tools.',
+  'cron.', 'skills.', 'tts.', 'stt.', 'config.get', 'node.list',
+  'node.camera', 'node.screen', 'oauth.', 'health',
+];
+
+app.post('/api/gateway/rpc', sensitiveLimit, async (req, res) => {
   const { method, params } = req.body;
   if (!method) {
     return res.status(400).json({ error: 'method is required' });
+  }
+  // Validate method against allowlist
+  const allowed = ALLOWED_RPC_PREFIXES.some(prefix =>
+    method === prefix || method.startsWith(prefix)
+  );
+  if (!allowed) {
+    return res.status(403).json({ error: `RPC method '${method}' is not permitted` });
   }
   if (!isGatewayConnected()) {
     return res.status(503).json({ error: 'Gateway not connected' });
@@ -132,7 +216,7 @@ app.post('/api/gateway/rpc', async (req, res) => {
     const result = await callGateway(method, params || {});
     res.json({ ok: true, payload: result });
   } catch (err) {
-    res.status(502).json({ ok: false, error: err.message, code: err.code });
+    res.status(502).json({ ok: false, error: 'Gateway RPC failed' });
   }
 });
 
@@ -198,7 +282,7 @@ app.get('/api/gateway/cron', async (req, res) => {
   }
 });
 
-app.post('/api/gateway/send', async (req, res) => {
+app.post('/api/gateway/send', sensitiveLimit, async (req, res) => {
   const { channel, target, text, subject, attachments, replyTo, threadId } = req.body;
   if (!channel || !target || !text) {
     return res.status(400).json({ error: 'channel, target, and text are required' });
@@ -217,7 +301,7 @@ app.post('/api/gateway/send', async (req, res) => {
     const result = await callGateway('send', payload);
     res.json({ ok: true, result });
   } catch (err) {
-    res.status(502).json({ ok: false, error: err.message });
+    res.status(502).json({ ok: false, error: 'Message send failed' });
   }
 });
 
@@ -240,12 +324,15 @@ app.get('*', (req, res) => {
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
-initWebSocket(wss);
+initWebSocket(wss, `http://localhost:${PORT}`);
 
 server.listen(PORT, () => {
+  const token = getAuthToken();
   console.log(`\n  ============================`);
   console.log(`  COMPUTER ONLINE`);
   console.log(`  http://localhost:${PORT}`);
+  console.log(`  Auth Token: ${token.slice(0, 8)}...`);
+  console.log(`  Token file: data/.auth-token`);
   if (gatewayEnabled) {
     console.log(`  OpenClaw Gateway: ACTIVE`);
   }

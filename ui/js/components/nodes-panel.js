@@ -17,8 +17,7 @@ export class NodesPanel {
 
   async loadHistory() {
     try {
-      const res = await fetch('/api/gateway/nodes');
-      const data = await res.json();
+      const data = await this.api.get('/gateway/nodes');
       this.nodes = data.nodes || [];
       this.render();
     } catch {
@@ -31,8 +30,7 @@ export class NodesPanel {
     this.captureResult = { loading: true, type: 'camera' };
     this.render();
     try {
-      const res = await fetch(`/api/gateway/nodes/${encodeURIComponent(nodeId)}/camera`, { method: 'POST' });
-      const data = await res.json();
+      const data = await this.api.post(`/gateway/nodes/${encodeURIComponent(nodeId)}/camera`);
       this.captureResult = { loading: false, type: 'camera', data };
     } catch (err) {
       this.captureResult = { loading: false, type: 'camera', error: err.message };
@@ -45,8 +43,7 @@ export class NodesPanel {
     this.captureResult = { loading: true, type: 'screen' };
     this.render();
     try {
-      const res = await fetch(`/api/gateway/nodes/${encodeURIComponent(nodeId)}/screen`, { method: 'POST' });
-      const data = await res.json();
+      const data = await this.api.post(`/gateway/nodes/${encodeURIComponent(nodeId)}/screen`);
       this.captureResult = { loading: false, type: 'screen', data };
     } catch (err) {
       this.captureResult = { loading: false, type: 'screen', error: err.message };

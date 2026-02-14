@@ -1,12 +1,17 @@
 import { Router } from 'express';
 import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { generateSpeech } from '../services/tts.js';
 import { isGatewayConnected, callGateway } from '../services/gateway-client.js';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
+
 const router = Router();
 
-// Serve generated WAV files
-router.use('/audio', express.static('/tmp/computer-tts'));
+// Serve generated WAV files from data/tts-cache/
+router.use('/audio', express.static(path.join(PLUGIN_ROOT, 'data', 'tts-cache')));
 
 // Generate TTS — tries gateway providers first, falls back to local Coqui
 router.post('/speak', async (req, res) => {

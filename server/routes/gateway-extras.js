@@ -3,6 +3,7 @@
  */
 import { Router } from 'express';
 import { isGatewayConnected, callGateway } from '../services/gateway-client.js';
+import { escapeHtml } from '../utils/sanitize.js';
 
 const router = Router();
 
@@ -139,6 +140,12 @@ router.post('/nodes/:id/screen', async (req, res) => {
   }
 });
 
+const ALLOWED_NODE_COMMANDS = new Set([
+  'ls', 'df', 'uptime', 'whoami', 'ps', 'free', 'uname', 'hostname',
+  'date', 'cat /proc/meminfo', 'cat /proc/cpuinfo', 'sw_vers',
+  'sysctl -n hw.memsize', 'top -l 1 -n 0',
+]);
+
 router.post('/nodes/:id/execute', async (req, res) => {
   if (!isGatewayConnected()) {
     return res.status(503).json({ error: 'Gateway not connected' });
@@ -147,14 +154,18 @@ router.post('/nodes/:id/execute', async (req, res) => {
   if (!command) {
     return res.status(400).json({ error: 'command is required' });
   }
+  const trimmed = command.trim();
+  if (!ALLOWED_NODE_COMMANDS.has(trimmed)) {
+    return res.status(403).json({ error: 'Command not permitted. Allowed: ' + [...ALLOWED_NODE_COMMANDS].join(', ') });
+  }
   try {
     const result = await callGateway('node.execute', {
       nodeId: req.params.id,
-      command,
+      command: trimmed,
     });
     res.json({ ok: true, output: result });
   } catch (err) {
-    res.status(502).json({ error: err.message });
+    res.status(502).json({ error: 'Command execution failed' });
   }
 });
 
@@ -308,18 +319,18 @@ router.get('/oauth/:provider/callback', async (req, res) => {
   const { provider } = req.params;
   const { code, state, error } = req.query;
   if (error) {
-    return res.send(`<html><body><h2>OAuth Error</h2><p>${error}</p><script>window.close()</script></body></html>`);
+    return res.send(`<html><body><h2>OAuth Error</h2><p>${escapeHtml(error)}</p><script>window.close()</script></body></html>`);
   }
   try {
     await callGateway('oauth.callback', { provider, code, state });
     res.send(`<html><body style="background:#000;color:#ff9900;font-family:sans-serif;text-align:center;padding:60px">
       <h2>Authorization Complete</h2>
-      <p>${provider} connected successfully. You can close this window.</p>
+      <p>${escapeHtml(provider)} connected successfully. You can close this window.</p>
       <script>setTimeout(()=>window.close(),2000)</script>
     </body></html>`);
   } catch (err) {
     res.send(`<html><body style="background:#000;color:#ff3333;font-family:sans-serif;text-align:center;padding:60px">
-      <h2>Authorization Failed</h2><p>${err.message}</p>
+      <h2>Authorization Failed</h2><p>${escapeHtml(err.message)}</p>
       <script>setTimeout(()=>window.close(),5000)</script>
     </body></html>`);
   }

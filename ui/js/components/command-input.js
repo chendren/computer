@@ -151,12 +151,7 @@ export class CommandInput {
     if (!text || text.length > 200 || text.startsWith('Error:')) return;
 
     try {
-      const res = await fetch('/api/tts/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      const result = await res.json();
+      const result = await this.api.post('/tts/speak', { text });
       if (result.audioUrl) {
         this.audioPlayer.speak(result.audioUrl);
       }

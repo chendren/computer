@@ -8,7 +8,17 @@ import { transcripts } from '../services/storage.js';
 import { broadcast } from '../services/websocket.js';
 import { isGatewayConnected, callGateway } from '../services/gateway-client.js';
 
-const upload = multer({ dest: path.join(os.tmpdir(), 'computer-uploads') });
+const upload = multer({
+  dest: path.join(os.tmpdir(), 'computer-uploads'),
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('audio/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only audio files are accepted.'));
+    }
+  },
+});
 const router = Router();
 
 router.post('/file', upload.single('audio'), async (req, res) => {
@@ -77,8 +87,12 @@ router.post('/file', upload.single('audio'), async (req, res) => {
     broadcast('status', { message: 'Transcription complete', processing: false });
     res.json(item);
   } catch (err) {
-    broadcast('status', { message: `Transcription failed: ${err.message}`, processing: false });
-    res.status(500).json({ error: err.message });
+    broadcast('status', { message: 'Transcription failed', processing: false });
+    res.status(500).json({ error: 'Transcription failed' });
+  } finally {
+    if (req.file?.path) {
+      await fs.unlink(req.file.path).catch(() => {});
+    }
   }
 });
 

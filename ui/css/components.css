@@ -2188,3 +2188,88 @@
 .status-online { color: var(--lcars-green); }
 .status-offline { color: var(--lcars-red); }
 .status-warning { color: var(--lcars-gold); }
+
+/* ══════════════════════════════════════════════
+   Voice Assistant Toggle
+   ══════════════════════════════════════════════ */
+
+.voice-toggle {
+  background: none;
+  border: 2px solid #333;
+  color: #555;
+  font-size: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 12px;
+  transition: all 0.3s;
+  position: relative;
+}
+
+/* IDLE — dim */
+.voice-toggle[data-state="idle"] {
+  border-color: #333;
+  color: #555;
+}
+
+.voice-toggle[data-state="idle"]:hover {
+  border-color: var(--lcars-orange);
+  color: var(--lcars-orange);
+}
+
+/* LISTENING — amber pulse */
+.voice-toggle[data-state="listening"] {
+  border-color: var(--lcars-orange);
+  color: var(--lcars-orange);
+  box-shadow: 0 0 8px rgba(255, 153, 0, 0.4);
+  animation: voicePulseAmber 2s ease-in-out infinite;
+}
+
+/* CAPTURING — bright amber solid */
+.voice-toggle[data-state="capturing"] {
+  border-color: var(--lcars-gold);
+  color: var(--lcars-gold);
+  box-shadow: 0 0 16px rgba(255, 204, 0, 0.6);
+}
+
+/* PROCESSING — amber/red transition */
+.voice-toggle[data-state="processing"] {
+  border-color: var(--lcars-orange);
+  color: var(--lcars-orange);
+  animation: voicePulseAmber 1s ease-in-out infinite;
+}
+
+/* THINKING — red pulse */
+.voice-toggle[data-state="thinking"] {
+  border-color: var(--lcars-red);
+  color: var(--lcars-red);
+  box-shadow: 0 0 12px rgba(204, 85, 85, 0.5);
+  animation: voicePulseRed 1s ease-in-out infinite;
+}
+
+/* SPEAKING — green pulse */
+.voice-toggle[data-state="speaking"] {
+  border-color: var(--lcars-green);
+  color: var(--lcars-green);
+  box-shadow: 0 0 12px rgba(85, 204, 85, 0.5);
+  animation: voicePulseGreen 1.5s ease-in-out infinite;
+}
+
+@keyframes voicePulseAmber {
+  0%, 100% { box-shadow: 0 0 8px rgba(255, 153, 0, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(255, 153, 0, 0.6); }
+}
+
+@keyframes voicePulseRed {
+  0%, 100% { box-shadow: 0 0 8px rgba(204, 85, 85, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(204, 85, 85, 0.6); }
+}
+
+@keyframes voicePulseGreen {
+  0%, 100% { box-shadow: 0 0 8px rgba(85, 204, 85, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(85, 204, 85, 0.6); }
+}

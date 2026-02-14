@@ -53,8 +53,7 @@ const SECRET_PATTERNS = [
   // npm tokens
   { name: 'npm token',            pattern: /\bnpm_[A-Za-z0-9]{36,}\b/g },
 
-  // Heroku API key
-  { name: 'Heroku API key',       pattern: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g, contextRequired: true },
+  // Heroku UUID pattern removed — UUIDs are not secrets
 
   // SendGrid
   { name: 'SendGrid key',         pattern: /\bSG\.[A-Za-z0-9_-]{22,}\.[A-Za-z0-9_-]{22,}\b/g },
@@ -89,11 +88,14 @@ const REDACTED = '[REDACTED]';
 let totalRedactions = 0;
 let redactionLog = [];
 
+const MAX_SCAN_LENGTH = 1024 * 1024; // 1MB — skip to prevent ReDoS
+
 /**
  * Scan a string for known secret patterns and return redacted version.
  */
 function redactPatterns(str) {
   if (typeof str !== 'string' || str.length < 10) return { text: str, found: [] };
+  if (str.length > MAX_SCAN_LENGTH) return { text: str, found: [] };
 
   const found = [];
   let result = str;
@@ -215,4 +217,54 @@ export function getSecurityStats() {
     patterns_loaded: SECRET_PATTERNS.length,
     sensitive_fields_pattern: SENSITIVE_FIELD_NAMES.source,
   };
+}
+
+/**
+ * Scan a string for secrets and return redacted version.
+ * Exported for use by gateway-manager log redaction and other services.
+ */
+export function redactString(str) {
+  if (typeof str !== 'string' || str.length < 10) return str;
+  const { text } = redactPatterns(str);
+  return text;
+}
+
+/**
+ * Deep-walk and redact an object. Exported for broadcast redaction.
+ */
+export { deepRedact };
+
+/**
+ * Response scanning middleware — intercepts res.json() to redact secrets
+ * from outgoing responses before they reach the client.
+ */
+export function responseScan(req, res, next) {
+  const originalJson = res.json.bind(res);
+
+  res.json = function (body) {
+    if (body && typeof body === 'object') {
+      const { value, findings } = deepRedact(body);
+      if (findings.length > 0) {
+        totalRedactions += findings.length;
+        const entry = {
+          timestamp: new Date().toISOString(),
+          direction: 'outbound',
+          method: req.method,
+          path: req.path,
+          findings: findings.map(f => ({ type: f.type, path: f.path, preview: f.preview })),
+        };
+        redactionLog.push(entry);
+        if (redactionLog.length > 500) {
+          redactionLog = redactionLog.slice(-250);
+        }
+        console.warn(
+          `[SECURITY] Redacted ${findings.length} secret(s) from RESPONSE ${req.method} ${req.path}`
+        );
+        return originalJson(value);
+      }
+    }
+    return originalJson(body);
+  };
+
+  next();
 }

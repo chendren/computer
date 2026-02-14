@@ -11,6 +11,7 @@ import WebSocket from 'ws';
 import { v4 as uuid } from 'uuid';
 import { broadcast } from './websocket.js';
 import { getGatewayWsUrl, getGatewayToken, getGatewayStatus } from './gateway-manager.js';
+import { deepRedact } from '../middleware/security.js';
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 15000;
@@ -228,7 +229,10 @@ function handleResponse(frame) {
 }
 
 function handleEvent(frame) {
-  const { event, payload } = frame;
+  const { event, payload: rawPayload } = frame;
+
+  // Redact secrets from gateway payloads before broadcasting
+  const { value: payload } = deepRedact(rawPayload);
 
   // Forward all gateway events to LCARS UI
   broadcast('gateway_event', { event, payload });

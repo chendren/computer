@@ -1,24 +1,42 @@
 export class ApiClient {
   constructor(baseUrl) {
     this.baseUrl = baseUrl;
+    this.authToken = null;
+  }
+
+  setAuthToken(token) {
+    this.authToken = token;
+  }
+
+  _headers(extra = {}) {
+    const h = { ...extra };
+    if (this.authToken) {
+      h['Authorization'] = `Bearer ${this.authToken}`;
+    }
+    return h;
   }
 
   async get(path) {
-    const res = await fetch(`${this.baseUrl}${path}`);
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      headers: this._headers(),
+    });
     return res.json();
   }
 
   async post(path, data) {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this._headers({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
     });
     return res.json();
   }
 
   async delete(path) {
-    const res = await fetch(`${this.baseUrl}${path}`, { method: 'DELETE' });
+    const res = await fetch(`${this.baseUrl}${path}`, {
+      method: 'DELETE',
+      headers: this._headers(),
+    });
     return res.json();
   }
 
@@ -27,6 +45,7 @@ export class ApiClient {
     form.append('audio', file);
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: 'POST',
+      headers: this._headers(),
       body: form,
     });
     return res.json();
@@ -35,7 +54,7 @@ export class ApiClient {
   async queryClaudeStream(prompt, systemPrompt, onChunk) {
     const res = await fetch(`${this.baseUrl}/claude/query`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this._headers({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ prompt, systemPrompt }),
     });
 

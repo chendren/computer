@@ -53,8 +53,7 @@ export class ChannelsPanel {
 
   async loadHistory() {
     try {
-      const res = await fetch('/api/gateway/channels');
-      const data = await res.json();
+      const data = await this.api.get('/gateway/channels');
       this.channels = data.channels || [];
       // Load OAuth status in parallel
       this.loadOAuthStatus();
@@ -66,8 +65,7 @@ export class ChannelsPanel {
 
   async loadOAuthStatus() {
     try {
-      const res = await fetch('/api/gateway/oauth/status');
-      const data = await res.json();
+      const data = await this.api.get('/gateway/oauth/status');
       this.oauthStatus = data.providers || {};
     } catch {
       this.oauthStatus = {};
@@ -194,11 +192,7 @@ export class ChannelsPanel {
     }
 
     try {
-      await fetch('/api/gateway/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      await this.api.post('/gateway/send', payload);
       input.value = '';
       this.attachments = [];
       this.messages.push({
@@ -230,8 +224,7 @@ export class ChannelsPanel {
 
   async loadChannelConfig() {
     try {
-      const res = await fetch('/api/gateway/channel-config');
-      const data = await res.json();
+      const data = await this.api.get('/gateway/channel-config');
       this.channelConfig = data.channels || {};
     } catch {
       this.channelConfig = {};
@@ -242,12 +235,7 @@ export class ChannelsPanel {
 
   async startOAuth(provider) {
     try {
-      const res = await fetch(`/api/gateway/oauth/${encodeURIComponent(provider)}/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
+      const data = await this.api.post(`/gateway/oauth/${encodeURIComponent(provider)}/start`, {});
       if (data.authUrl) {
         window.open(data.authUrl, `oauth_${provider}`, 'width=600,height=700');
         // Poll for completion
@@ -279,7 +267,7 @@ export class ChannelsPanel {
   async revokeOAuth(provider) {
     if (!confirm(`Revoke ${provider} authorization?`)) return;
     try {
-      await fetch(`/api/gateway/oauth/${encodeURIComponent(provider)}/revoke`, { method: 'POST' });
+      await this.api.post(`/gateway/oauth/${encodeURIComponent(provider)}/revoke`);
       await this.loadOAuthStatus();
       this.render();
     } catch (err) {
@@ -301,8 +289,7 @@ export class ChannelsPanel {
     try {
       const id = encodeURIComponent(this.selectedChannel);
       const folder = encodeURIComponent(this.inbox.folder);
-      const res = await fetch(`/api/gateway/channels/${id}/inbox?limit=25&offset=${offset}&folder=${folder}`);
-      const data = await res.json();
+      const data = await this.api.get(`/gateway/channels/${id}/inbox?limit=25&offset=${offset}&folder=${folder}`);
       this.inbox.messages = data.messages || [];
       this.inbox.total = data.total || 0;
       this.inbox.offset = offset;
@@ -312,8 +299,7 @@ export class ChannelsPanel {
     // Also load folders
     try {
       const id = encodeURIComponent(this.selectedChannel);
-      const res = await fetch(`/api/gateway/channels/${id}/folders`);
-      const data = await res.json();
+      const data = await this.api.get(`/gateway/channels/${id}/folders`);
       this.folders = data.folders || [];
     } catch {
       this.folders = [];
@@ -333,8 +319,7 @@ export class ChannelsPanel {
     try {
       const id = encodeURIComponent(this.selectedChannel);
       const tid = encodeURIComponent(threadId);
-      const res = await fetch(`/api/gateway/channels/${id}/threads/${tid}`);
-      const data = await res.json();
+      const data = await this.api.get(`/gateway/channels/${id}/threads/${tid}`);
       this.threadMessages = data.messages || [];
       if (data.subject) this.threadSubject = data.subject;
     } catch {

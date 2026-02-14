@@ -6,7 +6,18 @@ import fs from 'fs/promises';
 import { isGatewayConnected, callGateway } from '../services/gateway-client.js';
 import { broadcast } from '../services/websocket.js';
 
-const upload = multer({ dest: path.join(os.tmpdir(), 'computer-media') });
+const ALLOWED_MEDIA_TYPES = /^(image|video|audio)\//;
+const upload = multer({
+  dest: path.join(os.tmpdir(), 'computer-media'),
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
+  fileFilter: (req, file, cb) => {
+    if (ALLOWED_MEDIA_TYPES.test(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only image, video, and audio files are accepted.'));
+    }
+  },
+});
 const router = Router();
 
 // List available media analysis providers
@@ -65,8 +76,8 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
       filename: req.file.originalname,
     });
   } catch (err) {
-    broadcast('status', { message: `Media analysis failed: ${err.message}`, processing: false });
-    res.status(500).json({ error: err.message });
+    broadcast('status', { message: 'Media analysis failed', processing: false });
+    res.status(500).json({ error: 'Media analysis failed' });
   } finally {
     // Cleanup uploaded file
     await fs.unlink(req.file.path).catch(() => {});
@@ -96,7 +107,7 @@ router.post('/video/frames', upload.single('file'), async (req, res) => {
 
     res.json({ ok: true, frames: result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Video frame extraction failed' });
   } finally {
     await fs.unlink(req.file.path).catch(() => {});
   }

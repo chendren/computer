@@ -10,8 +10,7 @@ export class SecurityPanel {
 
   async loadHistory() {
     try {
-      const res = await fetch('/api/security/stats');
-      const stats = await res.json();
+      const stats = await this.api.get('/security/stats');
       this.render(stats);
     } catch {
       this.renderOffline();

@@ -29,12 +29,7 @@ export class BrowserPanel {
     }
 
     try {
-      const res = await fetch('/api/gateway/rpc', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method: 'browser.request', params: { action: 'navigate', url } }),
-      });
-      const data = await res.json();
+      const data = await this.api.post('/gateway/rpc', { method: 'browser.request', params: { action: 'navigate', url } });
       this.renderResult(data);
     } catch (err) {
       this.renderError(err.message);
