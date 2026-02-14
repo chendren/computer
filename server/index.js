@@ -12,6 +12,7 @@ import knowledgeRoutes from './routes/knowledge.js';
 import transcribeRoutes from './routes/transcribe.js';
 import claudeRoutes from './routes/claude.js';
 import ttsRoutes from './routes/tts.js';
+import { securityScan, getSecurityStats } from './middleware/security.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(__dirname, '..');
@@ -20,6 +21,10 @@ const PORT = process.env.COMPUTER_PORT || 3141;
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Security: scan all POST/PUT/PATCH bodies for tokens, keys, passwords
+app.use(securityScan);
+
 app.use(express.static(path.join(PLUGIN_ROOT, 'ui')));
 
 await initStorage(PLUGIN_ROOT);
@@ -41,6 +46,10 @@ app.get('/api/health', async (req, res) => {
     vectordb: 'online',
     ollama: await isOllamaAvailable() ? 'online' : 'offline',
   });
+});
+
+app.get('/api/security/stats', (req, res) => {
+  res.json(getSecurityStats());
 });
 
 // SPA fallback
