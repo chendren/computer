@@ -28,6 +28,9 @@
       <button class="lcars-button" data-panel="analysis">Analysis</button>
       <button class="lcars-button" data-panel="charts">Charts</button>
       <button class="lcars-button" data-panel="search">Search</button>
+      <button class="lcars-button" data-panel="log">Log</button>
+      <button class="lcars-button" data-panel="monitor">Monitor</button>
+      <button class="lcars-button" data-panel="compare">Compare</button>
       <div class="lcars-sidebar-spacer"></div>
       <div id="status-indicators"></div>
     </nav>
@@ -98,6 +101,36 @@
         <div class="search-results-list" id="search-results">
           <div class="empty-state">
             <div class="empty-state-text">Enter a query above</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Captain's Log Panel -->
+      <div id="panel-log" class="panel">
+        <div class="lcars-label">Captain's Log</div>
+        <div id="log-list" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-text">No log entries</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Monitor Panel -->
+      <div id="panel-monitor" class="panel">
+        <div class="lcars-label">Active Monitors</div>
+        <div id="monitor-list" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-text">No monitors active</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Comparison Panel -->
+      <div id="panel-compare" class="panel">
+        <div class="lcars-label">Comparative Analysis</div>
+        <div id="comparison-results" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-text">No comparisons yet</div>
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { transcripts, analyses, sessions } from '../services/storage.js';
+import { transcripts, analyses, sessions, logs, monitors, comparisons } from '../services/storage.js';
 import { broadcast } from '../services/websocket.js';
 
 const router = Router();
@@ -53,6 +53,39 @@ router.get('/sessions', async (req, res) => {
 
 router.post('/sessions', async (req, res) => {
   const item = await sessions.save(req.body);
+  res.json(item);
+});
+
+// Captain's Logs
+router.get('/logs', async (req, res) => {
+  res.json(await logs.list());
+});
+
+router.post('/logs', async (req, res) => {
+  const item = await logs.save(req.body);
+  broadcast('log', item);
+  res.json(item);
+});
+
+// Monitors
+router.get('/monitors', async (req, res) => {
+  res.json(await monitors.list());
+});
+
+router.post('/monitors', async (req, res) => {
+  const item = await monitors.save(req.body);
+  broadcast('monitor', item);
+  res.json(item);
+});
+
+// Comparisons
+router.get('/comparisons', async (req, res) => {
+  res.json(await comparisons.list());
+});
+
+router.post('/comparisons', async (req, res) => {
+  const item = await comparisons.save(req.body);
+  broadcast('comparison', item);
   res.json(item);
 });
 

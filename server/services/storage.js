@@ -6,7 +6,7 @@ let dataDir;
 
 export async function initStorage(pluginRoot) {
   dataDir = path.join(pluginRoot, 'data');
-  const dirs = ['transcripts', 'analyses', 'sessions'];
+  const dirs = ['transcripts', 'analyses', 'sessions', 'logs', 'monitors', 'comparisons'];
   for (const dir of dirs) {
     await fs.mkdir(path.join(dataDir, dir), { recursive: true });
   }
@@ -61,4 +61,22 @@ export const sessions = {
   list: () => listItems('sessions'),
   get: (id) => getItem('sessions', id),
   save: (data) => saveItem('sessions', { type: 'session', ...data }),
+};
+
+export const logs = {
+  list: () => listItems('logs'),
+  get: (id) => getItem('logs', id),
+  save: (data) => saveItem('logs', { type: 'log', ...data }),
+};
+
+export const monitors = {
+  list: () => listItems('monitors'),
+  get: (id) => getItem('monitors', id),
+  save: (data) => saveItem('monitors', { type: 'monitor', ...data }),
+};
+
+export const comparisons = {
+  list: () => listItems('comparisons'),
+  get: (id) => getItem('comparisons', id),
+  save: (data) => saveItem('comparisons', { type: 'comparison', ...data }),
 };

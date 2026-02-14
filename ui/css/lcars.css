@@ -134,6 +134,9 @@ html, body {
 .lcars-button:nth-child(3) { background: var(--lcars-blue); }
 .lcars-button:nth-child(4) { background: var(--lcars-light-blue); }
 .lcars-button:nth-child(5) { background: var(--lcars-peach); }
+.lcars-button:nth-child(6) { background: var(--lcars-gold); }
+.lcars-button:nth-child(7) { background: var(--lcars-rose); }
+.lcars-button:nth-child(8) { background: var(--lcars-lavender); }
 
 .lcars-button.active {
   filter: brightness(1.4);

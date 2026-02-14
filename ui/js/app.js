@@ -8,6 +8,9 @@ import { AnalysisPanel } from './components/analysis-panel.js';
 import { SearchPanel } from './components/search-panel.js';
 import { CommandInput } from './components/command-input.js';
 import { StatusBar } from './components/status-bar.js';
+import { LogPanel } from './components/log-panel.js';
+import { MonitorPanel } from './components/monitor-panel.js';
+import { ComparisonPanel } from './components/comparison-panel.js';
 
 class ComputerApp {
   constructor() {
@@ -22,6 +25,9 @@ class ComputerApp {
     this.charts = new ChartPanel();
     this.analysis = new AnalysisPanel();
     this.search = new SearchPanel(this.api);
+    this.log = new LogPanel(this.api);
+    this.monitor = new MonitorPanel(this.api);
+    this.comparison = new ComparisonPanel();
     this.command = new CommandInput(this.api, this.ws);
     this.command.audioPlayer = this.audio;
     this.voice = new VoiceInput(this.transcript, this.statusBar, this.ws, this.command);
@@ -48,6 +54,24 @@ class ComputerApp {
     this.ws.on('search', (data) => {
       this.search.display(data);
       this.switchPanel('search');
+    });
+
+    this.ws.on('log', (data) => {
+      this.log.addEntry(data);
+      this.switchPanel('log');
+    });
+
+    this.ws.on('monitor', (data) => {
+      this.monitor.display(data);
+      this.switchPanel('monitor');
+    });
+
+    this.ws.on('comparison', (data) => {
+      this.comparison.display(data);
+      this.switchPanel('compare');
+      if (data.chartSpec) {
+        this.charts.render(data.chartSpec);
+      }
     });
 
     this.ws.on('status', (data) => {
@@ -97,6 +121,9 @@ class ComputerApp {
     await Promise.allSettled([
       this.transcript.loadHistory(),
       this.analysis.loadHistory(this.api),
+      this.log.loadHistory(),
+      this.monitor.loadHistory(),
+      this.comparison.loadHistory(this.api),
     ]);
   }
 }
