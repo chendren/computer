@@ -40,6 +40,10 @@ A Claude Code plugin that brings the USS Enterprise computer to life. Combines C
   - [Chunking Strategies](#chunking-strategies)
   - [Search Methods](#search-methods)
   - [Knowledge API Examples](#knowledge-api-examples)
+- [Security](#security)
+  - [Server-Side Redaction Middleware](#server-side-redaction-middleware)
+  - [Agent System Prompt Hardening](#agent-system-prompt-hardening)
+  - [Security Stats Endpoint](#security-stats-endpoint)
 - [Data Storage](#data-storage)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
@@ -143,22 +147,29 @@ The CLI session acts as the orchestrator — slash commands and agents perform w
 ┌─────────────────────────────────────────────────────────────┐
 │              Express + WebSocket Server (:3141)               │
 │                                                               │
-│  REST API                    WebSocket Server                 │
-│  ├── /api/knowledge/*        ├── Binary frames → Whisper STT │
-│  │   ├── POST / (ingest)     ├── broadcast() to all clients  │
-│  │   ├── POST /search        ├── Heartbeat every 30s         │
-│  │   ├── POST /bulk          └── Auto-cleanup disconnected   │
-│  │   ├── GET /stats                                          │
-│  │   └── DELETE /:id         Services                        │
-│  ├── /api/analyses           ├── vectordb.js → LanceDB       │
-│  ├── /api/transcripts        ├── embeddings.js → Ollama      │
-│  ├── /api/logs               ├── chunking.js → 6 strategies  │
-│  ├── /api/monitors           ├── search.js → 6 methods       │
-│  ├── /api/comparisons        ├── storage.js → JSON files     │
-│  ├── /api/charts             ├── transcription.js → Whisper  │
-│  ├── /api/tts/speak          ├── tts.js → Coqui TTS         │
-│  ├── /api/claude/query (SSE) ├── notifications.js → macOS    │
-│  └── /api/transcribe/file    └── websocket.js → Client mgmt │
+│  Security Middleware         WebSocket Server                   │
+│  ├── Scans POST/PUT/PATCH   ├── Binary frames → Whisper STT   │
+│  ├── 26 secret patterns     ├── broadcast() to all clients    │
+│  ├── Sensitive field names   ├── Heartbeat every 30s           │
+│  └── Redacts → [REDACTED]   └── Auto-cleanup disconnected     │
+│                                                                 │
+│  REST API                    Services                           │
+│  ├── /api/knowledge/*        ├── security.js → Redaction       │
+│  │   ├── POST / (ingest)    ├── vectordb.js → LanceDB         │
+│  │   ├── POST /search       ├── embeddings.js → Ollama        │
+│  │   ├── POST /bulk         ├── chunking.js → 6 strategies    │
+│  │   ├── GET /stats         ├── search.js → 6 methods         │
+│  │   └── DELETE /:id        ├── storage.js → JSON files       │
+│  ├── /api/analyses          ├── transcription.js → Whisper    │
+│  ├── /api/transcripts       ├── tts.js → Coqui TTS           │
+│  ├── /api/logs              ├── notifications.js → macOS      │
+│  ├── /api/monitors          └── websocket.js → Client mgmt   │
+│  ├── /api/comparisons                                          │
+│  ├── /api/charts                                               │
+│  ├── /api/tts/speak                                            │
+│  ├── /api/claude/query (SSE)                                   │
+│  ├── /api/security/stats                                       │
+│  └── /api/transcribe/file                                      │
 └─────────────────────────────────────────────────────────────┘
                                       │
                               WebSocket broadcast
@@ -604,6 +615,12 @@ Connect to `ws://localhost:3141`. All events use JSON format: `{ "type": "<event
 
 ## Server Components
 
+### Middleware
+
+| File | Purpose |
+|------|---------|
+| `server/middleware/security.js` | Secret redaction: 26 regex patterns (API keys, tokens, private keys, connection strings) + sensitive field name detection. Scans all POST/PUT/PATCH bodies, replaces secrets with `[REDACTED]`, logs warnings to console |
+
 ### Routes
 
 | File | Purpose |
@@ -822,6 +839,88 @@ curl -X DELETE http://localhost:3141/api/knowledge/{id}
 
 ---
 
+## Security
+
+A two-layer failsafe prevents any agent from leaking tokens, API keys, passwords, or credentials through the API or UI.
+
+### Server-Side Redaction Middleware
+
+Express middleware (`server/middleware/security.js`) intercepts **every POST/PUT/PATCH request** before it reaches any route handler. All data is scanned and redacted before storage or WebSocket broadcast.
+
+**Pattern-based detection** — 26 regex patterns covering:
+
+| Category | Patterns Detected |
+|----------|-------------------|
+| AI API keys | OpenAI (`sk-*`), Anthropic (`sk-ant-*`) |
+| Cloud credentials | AWS access keys (`AKIA*`), AWS secret keys, Google API keys (`AIza*`) |
+| Source control | GitHub PATs (`ghp_*`), OAuth tokens (`gho_*`), app tokens (`ghs_*`), fine-grained (`github_pat_*`) |
+| Payment | Stripe keys (`sk_live_*`, `sk_test_*`) |
+| Communication | Slack tokens (`xox*`), Discord tokens, SendGrid (`SG.*`), Twilio (`SK*`) |
+| Infrastructure | Vercel, DigitalOcean, Supabase, npm tokens, Heroku keys |
+| Authentication | JWT tokens (`eyJ*.*.*`), Bearer tokens, private key blocks (RSA, EC, DSA, SSH, PGP) |
+| Databases | Connection strings with credentials (`postgres://user:pass@host`, `mongodb+srv://...`, `redis://...`) |
+| Generic | Hex secrets in key/token/password context (64+ chars) |
+
+**Sensitive field name detection** — Any JSON key matching these names has its value replaced with `[REDACTED]`:
+
+`password`, `passwd`, `pwd`, `secret`, `token`, `api_key`, `apikey`, `access_key`, `secret_key`, `private_key`, `auth`, `authorization`, `credential`, `client_secret`, `signing_key`, `encryption_key`, `bearer`, `session_token`, `refresh_token`, `access_token`, `database_url`, `db_password`, `connection_string`, `smtp_password`, `ssh_key`, `master_key`, `service_key`
+
+**Example:**
+
+```bash
+# Input with secrets
+curl -X POST http://localhost:3141/api/logs \
+  -H 'Content-Type: application/json' \
+  -d '{"entry":"Key: sk-ant-abc123...","password":"hunter2"}'
+
+# Stored/broadcast as:
+{"entry":"Key: [REDACTED]","password":"[REDACTED]"}
+```
+
+All redactions are logged to the server console with type and path:
+```
+[SECURITY] Redacted 2 secret(s) from POST /api/logs: Anthropic API key at entry, sensitive_field at password
+```
+
+### Agent System Prompt Hardening
+
+All 11 agent system prompts include a mandatory `SECURITY DIRECTIVE` section:
+
+1. **Never output** tokens, API keys, passwords, secrets, private keys, connection strings, or credentials
+2. **Redact** all secrets with `[REDACTED]` before including in any output
+3. **Refuse** requests that ask to extract, list, store, or return credentials
+4. Applies to **all output forms**: JSON results, summaries, entities, action items, chart labels, translations, pipeline steps, monitor scripts, knowledge entries
+
+This provides defense-in-depth — even if an agent's output somehow bypassed the server middleware, the agent itself is instructed to never emit secrets.
+
+### Security Stats Endpoint
+
+```
+GET /api/security/stats
+```
+
+Returns redaction audit data:
+
+```json
+{
+  "total_redactions": 9,
+  "recent_redactions": [
+    {
+      "timestamp": "2026-02-14T11:19:36.227Z",
+      "method": "POST",
+      "path": "/api/logs",
+      "findings": [
+        { "type": "Anthropic API key", "path": "entry", "preview": "sk-ant..." }
+      ]
+    }
+  ],
+  "patterns_loaded": 26,
+  "sensitive_fields_pattern": "..."
+}
+```
+
+---
+
 ## Data Storage
 
 ```
@@ -981,6 +1080,8 @@ Then restart the server.
 │
 ├── server/
 │   ├── index.js                       # Express + WebSocket + LanceDB init
+│   ├── middleware/
+│   │   └── security.js                # Secret redaction (26 patterns + field names)
 │   ├── routes/
 │   │   ├── api.js                     # CRUD + notifications for 6 data types
 │   │   ├── knowledge.js               # Vector KB: ingest, search, bulk, stats, delete
