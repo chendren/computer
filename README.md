@@ -1,12 +1,13 @@
 # Computer — Star Trek Enterprise AI Agent
 
-A Claude Code plugin that brings the USS Enterprise computer to life. Combines Claude's AI capabilities with a locally-served LCARS-themed web interface for voice interaction, text analysis, data visualization, web search, monitoring, knowledge management, and conversational AI — all running on your machine with local vector search. Integrates with OpenClaw gateway for 21 messaging channels, browser automation, cron scheduling, multi-platform nodes, and plugin management.
+A Claude Code plugin that brings the USS Enterprise computer to life. Combines local AI capabilities with a locally-served LCARS-themed web interface for voice interaction, text analysis, data visualization, web search, monitoring, knowledge management, and conversational AI — all running on your machine with local vector search and local LLM inference via Ollama. Integrates with OpenClaw gateway for 21 messaging channels, browser automation, cron scheduling, multi-platform nodes, and plugin management.
 
 ![LCARS Interface](https://img.shields.io/badge/UI-LCARS%20Theme-FF9900?style=flat-square&labelColor=000000)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-CC99CC?style=flat-square&labelColor=000000)
 ![Node.js](https://img.shields.io/badge/Node.js-Express%20%2B%20WebSocket-9999FF?style=flat-square&labelColor=000000)
 ![LanceDB](https://img.shields.io/badge/Vector%20DB-LanceDB-55CC55?style=flat-square&labelColor=000000)
 ![Voice Assistant](https://img.shields.io/badge/Voice-Always%20Listening-CC4444?style=flat-square&labelColor=000000)
+![Ollama](https://img.shields.io/badge/LLM-Qwen%202.5%20via%20Ollama-66CCFF?style=flat-square&labelColor=000000)
 ![OpenClaw](https://img.shields.io/badge/Gateway-OpenClaw-FFCC00?style=flat-square&labelColor=000000)
 
 ---
@@ -72,7 +73,7 @@ Computer is a Claude Code plugin that functions as an AI assistant modeled after
 When the OpenClaw gateway is available, Computer manages it as a supervised subprocess on port 18789, connecting via WebSocket RPC to access all 21 messaging channels, browser automation, cron scheduling, multi-platform nodes, and plugin infrastructure.
 
 **Key design principles:**
-- Fully local: Voice transcription via Whisper, text-to-speech via Coqui TTS, embeddings via Ollama — no external APIs for voice or search
+- Fully local: Voice transcription via Whisper, text-to-speech via Coqui TTS, LLM inference via Ollama (Qwen 2.5 7B), embeddings via Ollama — no external APIs required
 - Gateway-enhanced: OpenClaw integration adds 21 channels, browser automation, cron, nodes, and advanced TTS/STT providers (ElevenLabs, Deepgram, Google) with local fallback
 - Vector-powered knowledge: LanceDB with nomic-embed-text (768-dim) for semantic search with 6 chunking strategies and 6 search methods
 - Real-time: WebSocket pushes data to the browser instantly as commands complete
@@ -86,12 +87,12 @@ When the OpenClaw gateway is available, Computer manages it as a supervised subp
 
 ### Always-Listening Voice Assistant
 - **Wake word activation** — Say "Computer" (or "Hey Computer") followed by a command. Always-on listening via browser microphone with Silero VAD (Voice Activity Detection) running in-browser via ONNX Runtime WebAssembly
-- **Claude Haiku tool use** — Voice commands are processed by Claude Haiku 4.5 with an agentic tool loop (15 tools) that can search the web, generate charts, switch panels, store knowledge, send messages, and more
-- **Speech-to-speech** — Full pipeline: VAD detects speech → Whisper STT transcribes → wake word regex match → Claude Haiku processes with tools → Coqui TTS speaks response → audio plays in browser
+- **Local LLM tool use** — Voice commands are processed by Qwen 2.5 7B via Ollama with an agentic tool loop (16 tools) that can search the web, generate charts, switch panels, store knowledge, send messages, and more. Zero API cost — runs entirely on your machine
+- **Speech-to-speech** — Full pipeline: VAD detects speech → Whisper STT transcribes → wake word regex match → Qwen 2.5 processes with tools → Coqui TTS speaks response → audio plays in browser
 - **Interruption support** — Speak during TTS playback to interrupt and issue a new command. VAD pauses during playback to prevent feedback loops
 - **Visual state indicator** — Diamond button in title bar with color-coded states: amber pulse (listening), bright amber (capturing), red pulse (thinking), green pulse (speaking)
-- **15 voice tools** — search_knowledge, store_knowledge, create_log, display_on_screen, send_message, list_channels, get_status, search_transcripts, create_monitor, get_briefing, generate_chart, browse_url, analyze_text, web_search, web_fetch
-- **Web search & fetch** — DuckDuckGo search integration and URL fetching with intelligent HTML-to-text extraction for real-time data lookups
+- **16 voice tools** — search_knowledge, store_knowledge, create_log, display_on_screen, send_message, list_channels, get_status, search_transcripts, create_monitor, get_briefing, generate_chart, browse_url, analyze_text, web_search, web_fetch, web_search_and_read
+- **Auto-search for live data** — Queries about prices, weather, stocks, news, or any current data automatically trigger a real web search before the LLM responds, injecting actual page content to prevent hallucination. Uses DuckDuckGo search + Instant Answers API + auto-fetch of top result pages
 - **Date-aware** — System prompt includes current date/time for accurate time-relative queries ("last week", "past 3 days")
 - **Session memory** — Per-WebSocket conversation history (20 turns, 30min TTL) for multi-turn voice interactions
 
@@ -164,9 +165,9 @@ When the OpenClaw gateway is available, Computer manages it as a supervised subp
 │                                                               │
 │  Security Middleware         WebSocket Server                  │
 │  ├── Bearer token auth       ├── Binary frames → Whisper STT  │
-│  ├── Scans POST/PUT/PATCH   ├── Voice protocol (15 tools)    │
-│  ├── 26 secret patterns     ├── Claude Haiku agentic loop    │
-│  ├── Sensitive field names   ├── Web search + fetch           │
+│  ├── Scans POST/PUT/PATCH   ├── Voice protocol (16 tools)    │
+│  ├── 26 secret patterns     ├── Qwen 2.5 agentic loop    │
+│  ├── Sensitive field names   ├── Web search + auto-fetch           │
 │  └── Redacts → [REDACTED]   └── Heartbeat every 30s          │
 │                                                               │
 │  REST API                    Services                         │
@@ -250,13 +251,13 @@ When the OpenClaw gateway is available, Computer manages it as a supervised subp
 
 | Tool | Purpose | Install |
 |------|---------|---------|
-| **ANTHROPIC_API_KEY** | Voice assistant (Claude Haiku) | [console.anthropic.com](https://console.anthropic.com) |
+| **Qwen 2.5 7B** | Voice assistant LLM | `ollama pull qwen2.5:7b-instruct-q4_K_M` |
 | **OpenAI Whisper** | Local speech-to-text | `pip install openai-whisper` |
 | **Coqui TTS** | Local text-to-speech | `pip install TTS` |
 | **FFmpeg** | Audio format conversion | `brew install ffmpeg` |
 | **OpenClaw (clawdbot)** | 21-channel gateway + browser + cron | `git clone` + `pnpm build` in `~/clawdbot/` |
 
-Whisper is expected at `/opt/homebrew/bin/whisper` and TTS at `/opt/homebrew/bin/tts`. OpenClaw gateway is optional — Computer degrades gracefully without it. The voice assistant requires `ANTHROPIC_API_KEY` for Claude Haiku processing.
+Whisper is expected at `/opt/homebrew/bin/whisper` (or `WHISPER_PATH` env var) and TTS at `/opt/homebrew/bin/tts` (or `TTS_PATH` env var). OpenClaw gateway is optional — Computer degrades gracefully without it. The voice assistant requires Ollama running with the Qwen 2.5 7B model.
 
 ---
 
@@ -405,7 +406,7 @@ The LCARS interface has 19 panels organized in three groups:
 **Voice command flow:**
 ```
 [Always-on mic] → [Silero VAD detects speech] → [Whisper STT transcribes]
-  → [Client checks for "Computer" wake word] → [Claude Haiku + 15 tools]
+  → [Client checks for "Computer" wake word] → [Qwen 2.5 + 16 tools]
   → [Tool execution (web search, charts, panels, etc.)]
   → [Coqui TTS generates audio] → [Browser plays response]
   → [Return to listening]
@@ -752,7 +753,7 @@ The `/api/tts/providers` and `/api/transcribe/providers` endpoints list all avai
 | `server/services/transcription.js` | Whisper CLI wrapper |
 | `server/services/tts.js` | Coqui TTS with sequential queue |
 | `server/services/claude-bridge.js` | Spawns `claude -p` child processes |
-| `server/services/voice-assistant.js` | Claude Haiku 4.5 with 15 tools, agentic loop, per-session conversation history |
+| `server/services/voice-assistant.js` | Qwen 2.5 7B via Ollama with 16 tools, agentic loop, auto-search, per-session conversation history |
 | `server/services/websocket.js` | WebSocket manager with binary audio, voice protocol, tool executor |
 | `server/services/notifications.js` | macOS desktop notifications via osascript |
 
@@ -971,14 +972,17 @@ data/
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `COMPUTER_PORT` | `3141` | Server port |
-| `ANTHROPIC_API_KEY` | (none) | Required for voice assistant (Claude Haiku 4.5) |
+| `VOICE_MODEL` | `qwen2.5:7b-instruct-q4_K_M` | Ollama model for voice assistant |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama API base URL |
+| `WHISPER_PATH` | `/opt/homebrew/bin/whisper` | Path to Whisper binary |
+| `TTS_PATH` | `/opt/homebrew/bin/tts` | Path to Coqui TTS binary |
 
 ### Hardcoded Paths
 
 | Constant | File | Default |
 |----------|------|---------|
-| `WHISPER_PATH` | `server/services/transcription.js` | `/opt/homebrew/bin/whisper` |
-| `TTS_PATH` | `server/services/tts.js` | `/opt/homebrew/bin/tts` |
+| `WHISPER_PATH` | `server/services/transcription.js` | `$WHISPER_PATH` or `/opt/homebrew/bin/whisper` |
+| `TTS_PATH` | `server/services/tts.js` | `$TTS_PATH` or `/opt/homebrew/bin/tts` |
 | `OLLAMA_URL` | `server/services/embeddings.js` | `http://localhost:11434` |
 | `EMBEDDING_MODEL` | `server/services/embeddings.js` | `nomic-embed-text` |
 | `GATEWAY_DIST` | `server/services/gateway-manager.js` | `~/clawdbot/dist/index.js` |
@@ -1033,7 +1037,7 @@ Commands use the `computer:` prefix: `/computer:analyze` (not `/computer-analyze
 ~/.claude/plugins/computer/
 ├── .claude-plugin/
 │   └── plugin.json
-├── package.json                       # v3.0.0 — express, ws, @lancedb/lancedb, @anthropic-ai/sdk, vad-web
+├── package.json                       # v3.0.0 — express, ws, @lancedb/lancedb, vad-web
 ├── README.md
 │
 ├── commands/                          # 17 slash commands
@@ -1074,7 +1078,7 @@ Commands use the `computer:` prefix: `/computer:analyze` (not `/computer-analyze
 │   │   ├── vectordb.js, embeddings.js, chunking.js, search.js
 │   │   ├── storage.js, claude-bridge.js
 │   │   ├── transcription.js, tts.js
-│   │   ├── voice-assistant.js         # Claude Haiku + 15 tools + agentic loop
+│   │   ├── voice-assistant.js         # Qwen 2.5 via Ollama + 16 tools + auto-search
 │   │   ├── websocket.js, notifications.js
 │   └── utils/
 │       ├── helpers.js

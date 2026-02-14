@@ -90,30 +90,32 @@ router.post('/comparisons', async (req, res) => {
   res.json(item);
 });
 
-// Notifications — wire into existing endpoints
-// Override analysis POST to also notify
-const _origAnalysis = router.stack.find(r => r.route?.path === '/analysis' && r.route?.methods?.post);
-if (_origAnalysis) {
-  const origHandler = _origAnalysis.route.stack[0].handle;
-  _origAnalysis.route.stack[0].handle = async (req, res) => {
-    await origHandler(req, res);
-    notifyComplete('Computer', `Analysis complete: ${req.body.title || 'New analysis'}`);
+// Notifications — wire into existing endpoints using Express middleware
+router.use('/analysis', (req, res, next) => {
+  if (req.method !== 'POST') return next();
+  const origJson = res.json.bind(res);
+  res.json = (body) => {
+    origJson(body);
+    try { notifyComplete('Computer', `Analysis complete: ${req.body.title || 'New analysis'}`); } catch {}
   };
-}
+  next();
+});
 
-// Override monitor POST to notify on alerts
-const _origMonitor = router.stack.find(r => r.route?.path === '/monitors' && r.route?.methods?.post);
-if (_origMonitor) {
-  const origHandler = _origMonitor.route.stack[0].handle;
-  _origMonitor.route.stack[0].handle = async (req, res) => {
-    await origHandler(req, res);
-    const status = req.body.status || 'updated';
-    if (status === 'alert' || status === 'triggered') {
-      notifyAlert('Monitor Alert', `${req.body.name || 'Monitor'}: ${req.body.message || status}`);
-    } else {
-      notify('Monitor', `${req.body.name || 'Monitor'}: ${status}`);
-    }
+router.use('/monitors', (req, res, next) => {
+  if (req.method !== 'POST') return next();
+  const origJson = res.json.bind(res);
+  res.json = (body) => {
+    origJson(body);
+    try {
+      const status = req.body.status || 'updated';
+      if (status === 'alert' || status === 'triggered') {
+        notifyAlert('Monitor Alert', `${req.body.name || 'Monitor'}: ${req.body.message || status}`);
+      } else {
+        notify('Monitor', `${req.body.name || 'Monitor'}: ${status}`);
+      }
+    } catch {}
   };
-}
+  next();
+});
 
 export default router;

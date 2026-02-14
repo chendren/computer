@@ -42,7 +42,9 @@ async function processChunk(ws, audioBuffer) {
     // Process next queued chunk
     if (whisperQueue.length > 0) {
       const next = whisperQueue.shift();
-      processChunk(next.ws, next.audioBuffer);
+      processChunk(next.ws, next.audioBuffer).catch(err => {
+        console.error('[ws] Queued chunk processing error:', err.message);
+      });
     }
   }
 }
@@ -60,12 +62,146 @@ function detectAudioFormat(buffer) {
   return 'webm';
 }
 
+// ── Web search & fetch helpers ────────────────────────────
+
+const WEB_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+function _extractText(html, maxLen = 8000) {
+  let clean = html;
+  // Remove non-content blocks
+  clean = clean.replace(/<script[\s\S]*?<\/script>/gi, '');
+  clean = clean.replace(/<style[\s\S]*?<\/style>/gi, '');
+  clean = clean.replace(/<nav[\s\S]*?<\/nav>/gi, '');
+  clean = clean.replace(/<footer[\s\S]*?<\/footer>/gi, '');
+  clean = clean.replace(/<!--[\s\S]*?-->/g, '');
+  // Convert tables to readable text (preserve data)
+  clean = clean.replace(/<\/th>/gi, ' | ');
+  clean = clean.replace(/<\/td>/gi, ' | ');
+  clean = clean.replace(/<\/tr>/gi, '\n');
+  // Convert block elements to newlines
+  clean = clean.replace(/<\/(p|div|h[1-6]|li|br|hr)[^>]*>/gi, '\n');
+  clean = clean.replace(/<br\s*\/?>/gi, '\n');
+  // Strip remaining tags
+  clean = clean.replace(/<[^>]*>/g, ' ');
+  // Decode entities
+  clean = clean.replace(/&nbsp;/g, ' ');
+  clean = clean.replace(/&amp;/g, '&');
+  clean = clean.replace(/&lt;/g, '<');
+  clean = clean.replace(/&gt;/g, '>');
+  clean = clean.replace(/&quot;/g, '"');
+  clean = clean.replace(/&#39;/g, "'");
+  clean = clean.replace(/&#x27;/g, "'");
+  clean = clean.replace(/&\w+;/g, ' ');
+  // Collapse whitespace but preserve newlines
+  clean = clean.replace(/[ \t]+/g, ' ');
+  clean = clean.replace(/\n\s*\n/g, '\n');
+  clean = clean.trim().slice(0, maxLen);
+  return clean;
+}
+
+async function _fetchWithTimeout(url, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': WEB_UA, 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json,*/*;q=0.8' },
+    });
+    clearTimeout(timeout);
+    return res;
+  } catch (err) {
+    clearTimeout(timeout);
+    throw err;
+  }
+}
+
+async function _webFetch(url) {
+  const res = await _fetchWithTimeout(url);
+  const text = await res.text();
+  if (res.headers.get('content-type')?.includes('json')) {
+    return { url, status: res.status, content: text.slice(0, 8000) };
+  }
+  return { url, status: res.status, content: _extractText(text) };
+}
+
+async function _webSearch(query) {
+  // 1. Try DuckDuckGo Instant Answers API first (returns structured data for factual queries)
+  let instantAnswer = null;
+  try {
+    const iaRes = await _fetchWithTimeout(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`, 5000);
+    const ia = await iaRes.json();
+    if (ia.Abstract) {
+      instantAnswer = ia.Abstract;
+    } else if (ia.Answer) {
+      instantAnswer = ia.Answer;
+    } else if (ia.Infobox?.content?.length > 0) {
+      instantAnswer = ia.Infobox.content.map(c => `${c.label}: ${c.value}`).join(', ');
+    }
+  } catch {}
+
+  // 2. HTML search for full results with URLs
+  const encoded = encodeURIComponent(query);
+  const res = await _fetchWithTimeout(`https://html.duckduckgo.com/html/?q=${encoded}`);
+  const html = await res.text();
+
+  const results = [];
+  // Extract each result block: link with href + title + snippet
+  const resultBlockRe = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = resultBlockRe.exec(html)) !== null && results.length < 8) {
+    let href = m[1];
+    // DuckDuckGo wraps URLs in redirect - extract actual URL
+    const uddg = href.match(/uddg=([^&]+)/);
+    if (uddg) href = decodeURIComponent(uddg[1]);
+    const title = m[2].replace(/<[^>]*>/g, '').trim();
+    const snippet = m[3].replace(/<[^>]*>/g, '').trim();
+    if (title && snippet) results.push({ title, url: href, snippet });
+  }
+
+  if (results.length === 0) {
+    let clean = _extractText(html, 4000);
+    return { query, instantAnswer, results: [], rawText: clean };
+  }
+  return { query, instantAnswer, results };
+}
+
+async function _webSearchAndRead(query, numResults = 3) {
+  const searchResult = await _webSearch(query);
+  const urls = (searchResult.results || []).slice(0, numResults);
+
+  // Fetch top results in parallel
+  const fetched = await Promise.allSettled(
+    urls.map(async (r) => {
+      try {
+        const page = await _webFetch(r.url);
+        return { url: r.url, title: r.title, content: page.content?.slice(0, 3000) || '' };
+      } catch (err) {
+        return { url: r.url, title: r.title, error: err.message };
+      }
+    })
+  );
+
+  const pages = fetched
+    .filter(f => f.status === 'fulfilled')
+    .map(f => f.value);
+
+  return {
+    query,
+    instantAnswer: searchResult.instantAnswer,
+    searchResults: searchResult.results?.map(r => ({ title: r.title, url: r.url, snippet: r.snippet })) || [],
+    pages,
+  };
+}
+
+// ── Tool executor ─────────────────────────────────────────
+
 /**
  * Create a tool executor that maps voice-assistant tool calls
  * to internal API endpoints via localhost fetch.
  */
 function createToolExecutor(baseUrl, ws) {
   return async (toolName, input) => {
+    try {
     switch (toolName) {
       case 'search_knowledge': {
         const res = await fetch(`${baseUrl}/api/knowledge/search`, {
@@ -110,7 +246,6 @@ function createToolExecutor(baseUrl, ws) {
       case 'get_status': {
         const res = await fetch(`${baseUrl}/api/health`, { headers: authHeaders() });
         const data = await res.json();
-        // Strip auth token from tool result
         delete data.authToken;
         return data;
       }
@@ -161,75 +296,31 @@ function createToolExecutor(baseUrl, ws) {
       }
       case 'web_fetch': {
         try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 10000);
-          const res = await fetch(input.url, {
-            signal: controller.signal,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json,*/*;q=0.8',
-            },
-          });
-          clearTimeout(timeout);
-          const text = await res.text();
-          // Try JSON first
-          if (res.headers.get('content-type')?.includes('json')) {
-            return { url: input.url, status: res.status, content: text.slice(0, 8000) };
-          }
-          // Strip script/style blocks first, then tags
-          let clean = text.replace(/<script[\s\S]*?<\/script>/gi, '');
-          clean = clean.replace(/<style[\s\S]*?<\/style>/gi, '');
-          clean = clean.replace(/<nav[\s\S]*?<\/nav>/gi, '');
-          clean = clean.replace(/<header[\s\S]*?<\/header>/gi, '');
-          clean = clean.replace(/<footer[\s\S]*?<\/footer>/gi, '');
-          clean = clean.replace(/<!--[\s\S]*?-->/g, '');
-          clean = clean.replace(/<[^>]*>/g, ' ');
-          clean = clean.replace(/&nbsp;/g, ' ');
-          clean = clean.replace(/&amp;/g, '&');
-          clean = clean.replace(/&lt;/g, '<');
-          clean = clean.replace(/&gt;/g, '>');
-          clean = clean.replace(/\s+/g, ' ').trim().slice(0, 8000);
-          return { url: input.url, status: res.status, content: clean };
+          return await _webFetch(input.url);
         } catch (err) {
           return { error: `Failed to fetch ${input.url}: ${err.message}` };
         }
       }
       case 'web_search': {
         try {
-          const query = encodeURIComponent(input.query);
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 10000);
-          const res = await fetch(`https://html.duckduckgo.com/html/?q=${query}`, {
-            signal: controller.signal,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-            },
-          });
-          clearTimeout(timeout);
-          const html = await res.text();
-          // Extract search result snippets
-          const results = [];
-          const snippetRe = /<a[^>]*class="result__a"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
-          let m;
-          while ((m = snippetRe.exec(html)) !== null && results.length < 8) {
-            const title = m[1].replace(/<[^>]*>/g, '').trim();
-            const snippet = m[2].replace(/<[^>]*>/g, '').trim();
-            if (title && snippet) results.push({ title, snippet });
-          }
-          if (results.length === 0) {
-            // Fallback: extract all text from result blocks
-            let clean = html.replace(/<script[\s\S]*?<\/script>/gi, '');
-            clean = clean.replace(/<style[\s\S]*?<\/style>/gi, '');
-            clean = clean.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000);
-            return { query: input.query, results: [], rawText: clean };
-          }
-          return { query: input.query, results };
+          return await _webSearch(input.query);
         } catch (err) {
           return { error: `Search failed: ${err.message}` };
         }
       }
+      case 'web_search_and_read': {
+        try {
+          return await _webSearchAndRead(input.query, input.num_results || 3);
+        } catch (err) {
+          return { error: `Search+read failed: ${err.message}` };
+        }
+      }
       default:
         return { error: `Unknown tool: ${toolName}` };
+    }
+    } catch (err) {
+      console.error(`[ws] Tool executor error (${toolName}):`, err.message);
+      return { error: `Tool '${toolName}' failed: ${err.message}` };
     }
   };
 }
@@ -330,9 +421,12 @@ export function initWebSocket(wss, baseUrl) {
           case 'voice_command':
             console.log(`[ws] voice_command: "${msg.data?.text}", voiceAvailable: ${isVoiceAvailable()}`);
             if (msg.data?.text && isVoiceAvailable()) {
-              handleVoiceCommand(ws, sessionId, msg.data.text, baseUrl);
+              handleVoiceCommand(ws, sessionId, msg.data.text, baseUrl).catch(err => {
+                console.error('[ws] Voice command error:', err.message);
+                sendTo(ws, 'voice_error', { error: err.message || 'Voice processing failed' });
+              });
             } else if (!isVoiceAvailable()) {
-              sendTo(ws, 'voice_error', { error: 'ANTHROPIC_API_KEY not configured' });
+              sendTo(ws, 'voice_error', { error: 'Ollama not available or qwen2.5 model not found' });
             }
             break;
           case 'voice_start':

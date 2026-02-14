@@ -102,7 +102,8 @@ export class GatewayPanel {
       await this.api.post(`/gateway/sessions/${encodeURIComponent(sessionKey)}/reset`);
       this.selectedSession = null;
       this.sessionHistory = null;
-      this.loadSessions();
+      await this.loadSessions();
+      this.render();
     } catch (err) {
       console.error('Session reset failed:', err);
     }
@@ -167,6 +168,16 @@ export class GatewayPanel {
     this.container.querySelectorAll('.session-reset-btn').forEach(btn => {
       btn.addEventListener('click', () => this.resetSession(btn.dataset.key));
     });
+
+    // Session detail back button
+    const backBtn = document.getElementById('session-back-btn');
+    if (backBtn) {
+      backBtn.addEventListener('click', () => {
+        this.selectedSession = null;
+        this.sessionHistory = null;
+        this.render();
+      });
+    }
   }
 
   renderOverview(proc, config) {

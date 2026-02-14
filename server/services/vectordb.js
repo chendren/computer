@@ -5,6 +5,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { embed, embedBatch } from './embeddings.js';
 import { chunk } from './chunking.js';
 
+/** Escape single quotes in values used in LanceDB WHERE clauses. */
+function esc(val) { return String(val).replace(/'/g, "''"); }
+
 let db;
 let chunksTable;
 let entriesTable;
@@ -149,10 +152,10 @@ export async function ingestEntry({
  */
 export async function deleteEntry(parentId) {
   if (chunksTable) {
-    await chunksTable.delete(`parent_id = '${parentId}'`);
+    await chunksTable.delete(`parent_id = '${esc(parentId)}'`);
   }
   if (entriesTable) {
-    await entriesTable.delete(`id = '${parentId}'`);
+    await entriesTable.delete(`id = '${esc(parentId)}'`);
   }
 }
 
@@ -163,7 +166,7 @@ export async function getEntry(parentId) {
   if (!entriesTable) return null;
 
   const entries = await entriesTable.query()
-    .where(`id = '${parentId}'`)
+    .where(`id = '${esc(parentId)}'`)
     .limit(1)
     .toArray();
 
@@ -175,7 +178,7 @@ export async function getEntry(parentId) {
   let chunks = [];
   if (chunksTable) {
     chunks = await chunksTable.query()
-      .where(`parent_id = '${parentId}'`)
+      .where(`parent_id = '${esc(parentId)}'`)
       .limit(1000)
       .toArray();
     // Strip vectors from response

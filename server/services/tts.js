@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
-const TTS_PATH = '/opt/homebrew/bin/tts';
+const TTS_PATH = process.env.TTS_PATH || '/opt/homebrew/bin/tts';
 const TTS_MODEL = 'tts_models/en/ljspeech/vits';
 const TTS_OUTPUT_DIR = path.join(PLUGIN_ROOT, 'data', 'tts-cache');
 

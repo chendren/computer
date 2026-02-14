@@ -1,15 +1,17 @@
 import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 import { generateId } from '../utils/helpers.js';
 
-const WHISPER_PATH = '/opt/homebrew/bin/whisper';
+const WHISPER_PATH = process.env.WHISPER_PATH || '/opt/homebrew/bin/whisper';
 
 // Transcribe a short audio chunk (3s) — uses tiny model for speed
 export async function transcribeChunk(audioBuffer, format = 'webm') {
   const chunkId = generateId();
-  const tmpPath = `/tmp/computer-chunk-${chunkId}.${format}`;
-  const outputDir = `/tmp/computer-chunk-${chunkId}-out`;
+  const tmpDir = os.tmpdir();
+  const tmpPath = path.join(tmpDir, `computer-chunk-${chunkId}.${format}`);
+  const outputDir = path.join(tmpDir, `computer-chunk-${chunkId}-out`);
 
   await fs.writeFile(tmpPath, audioBuffer);
   await fs.mkdir(outputDir, { recursive: true });
@@ -57,7 +59,7 @@ export async function transcribeChunk(audioBuffer, format = 'webm') {
 }
 
 export async function transcribeFile(filePath) {
-  const outputDir = `/tmp/computer-transcribe-${generateId()}`;
+  const outputDir = path.join(os.tmpdir(), `computer-transcribe-${generateId()}`);
   await fs.mkdir(outputDir, { recursive: true });
 
   return new Promise((resolve, reject) => {

@@ -4,9 +4,11 @@ import { isVoiceAvailable } from '../services/voice-assistant.js';
 const router = Router();
 
 router.get('/status', (req, res) => {
+  const model = process.env.VOICE_MODEL || 'qwen2.5:7b-instruct-q4_K_M';
   res.json({
     available: isVoiceAvailable(),
-    model: 'claude-haiku-4-5-20251001',
+    model,
+    provider: 'ollama',
     features: ['tool_use', 'conversation_history', 'tts', 'panel_switching'],
   });
 });

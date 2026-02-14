@@ -108,7 +108,7 @@ try {
   if (isGatewayAvailable()) {
     await startGateway();
     // Give gateway a moment to bind its port, then connect
-    setTimeout(() => connectToGateway(), 3000);
+    setTimeout(() => connectToGateway().catch(err => console.warn('[computer] Gateway connect failed:', err.message)), 3000);
     gatewayEnabled = true;
     console.log('[computer] OpenClaw gateway integration enabled');
   } else {
@@ -183,7 +183,7 @@ app.post('/api/gateway/restart', async (req, res) => {
   try {
     const { restartGateway } = await import('./services/gateway-manager.js');
     await restartGateway();
-    setTimeout(() => connectToGateway(), 3000);
+    setTimeout(() => connectToGateway().catch(err => console.warn('[computer] Gateway connect failed:', err.message)), 3000);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: 'Gateway restart failed' });

@@ -1,19 +1,32 @@
 import { embed, embedBatch, cosineSimilarity } from './embeddings.js';
 import { getChunksTable } from './vectordb.js';
 
+function safeParseTags(tags) {
+  if (Array.isArray(tags)) return tags;
+  try { return JSON.parse(tags || '[]'); } catch { return []; }
+}
+
+/**
+ * Escape a string for use in LanceDB WHERE clauses.
+ * Prevents injection by escaping single quotes.
+ */
+function escapeFilterValue(val) {
+  return String(val).replace(/'/g, "''");
+}
+
 /**
  * Build a LanceDB WHERE clause from metadata filters.
  */
 function buildWhereClause(filters) {
   const clauses = [];
-  if (filters.source) clauses.push(`source = '${filters.source}'`);
-  if (filters.confidence) clauses.push(`confidence = '${filters.confidence}'`);
-  if (filters.content_type) clauses.push(`content_type = '${filters.content_type}'`);
-  if (filters.date_range?.from) clauses.push(`created_at >= '${filters.date_range.from}'`);
-  if (filters.date_range?.to) clauses.push(`created_at <= '${filters.date_range.to}'`);
+  if (filters.source) clauses.push(`source = '${escapeFilterValue(filters.source)}'`);
+  if (filters.confidence) clauses.push(`confidence = '${escapeFilterValue(filters.confidence)}'`);
+  if (filters.content_type) clauses.push(`content_type = '${escapeFilterValue(filters.content_type)}'`);
+  if (filters.date_range?.from) clauses.push(`created_at >= '${escapeFilterValue(filters.date_range.from)}'`);
+  if (filters.date_range?.to) clauses.push(`created_at <= '${escapeFilterValue(filters.date_range.to)}'`);
   // Tags are JSON-encoded strings — use LIKE for basic matching
   if (filters.tags?.length) {
-    const tagClauses = filters.tags.map(t => `tags LIKE '%"${t}"%'`);
+    const tagClauses = filters.tags.map(t => `tags LIKE '%"${escapeFilterValue(t)}"%'`);
     clauses.push(`(${tagClauses.join(' OR ')})`);
   }
   return clauses.length > 0 ? clauses.join(' AND ') : null;
@@ -43,7 +56,7 @@ function formatResult(row, score) {
     score: +score.toFixed(4),
     title: row.title,
     source: row.source,
-    tags: JSON.parse(row.tags || '[]'),
+    tags: safeParseTags(row.tags),
     confidence: row.confidence,
     content_type: row.content_type,
     chunk_index: row.chunk_index,

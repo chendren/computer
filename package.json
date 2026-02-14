@@ -9,7 +9,6 @@
     "dev": "node --watch server/index.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.74.0",
     "@lancedb/lancedb": "^0.26.2",
     "@ricky0123/vad-web": "^0.0.19",
     "cors": "^2.8.5",

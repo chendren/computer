@@ -20,6 +20,10 @@ export class ApiClient {
     const res = await fetch(`${this.baseUrl}${path}`, {
       headers: this._headers(),
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
     return res.json();
   }
 
@@ -29,6 +33,10 @@ export class ApiClient {
       headers: this._headers({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
     return res.json();
   }
 
@@ -37,6 +45,10 @@ export class ApiClient {
       method: 'DELETE',
       headers: this._headers(),
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `HTTP ${res.status}`);
+    }
     return res.json();
   }
 

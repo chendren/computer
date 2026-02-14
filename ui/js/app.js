@@ -112,6 +112,16 @@ class ComputerApp {
       }
     });
 
+    // Voice assistant: browser navigation
+    this.ws.on('browser_navigate', (data) => {
+      if (data.url) {
+        const urlInput = document.getElementById('browser-url-input');
+        if (urlInput) urlInput.value = data.url;
+        this.switchPanel('browser');
+        this.browser.navigate();
+      }
+    });
+
     // Gateway status updates for footer
     this.ws.on('gateway_status', (data) => {
       const el = document.getElementById('status-gateway');
