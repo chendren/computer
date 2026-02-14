@@ -11,6 +11,8 @@ import { StatusBar } from './components/status-bar.js';
 import { LogPanel } from './components/log-panel.js';
 import { MonitorPanel } from './components/monitor-panel.js';
 import { ComparisonPanel } from './components/comparison-panel.js';
+import { DashboardPanel } from './components/dashboard-panel.js';
+import { KnowledgePanel } from './components/knowledge-panel.js';
 
 class ComputerApp {
   constructor() {
@@ -28,8 +30,10 @@ class ComputerApp {
     this.log = new LogPanel(this.api);
     this.monitor = new MonitorPanel(this.api);
     this.comparison = new ComparisonPanel();
+    this.knowledge = new KnowledgePanel(this.api);
     this.command = new CommandInput(this.api, this.ws);
     this.command.audioPlayer = this.audio;
+    this.dashboard = new DashboardPanel(this.api, this.ws);
     this.voice = new VoiceInput(this.transcript, this.statusBar, this.ws, this.command);
 
     // WebSocket handlers — auto-switch to relevant panel on data push
@@ -72,6 +76,11 @@ class ComputerApp {
       if (data.chartSpec) {
         this.charts.render(data.chartSpec);
       }
+    });
+
+    this.ws.on('knowledge', (data) => {
+      this.knowledge.addEntry(data);
+      this.switchPanel('knowledge');
     });
 
     this.ws.on('status', (data) => {
@@ -124,6 +133,8 @@ class ComputerApp {
       this.log.loadHistory(),
       this.monitor.loadHistory(),
       this.comparison.loadHistory(this.api),
+      this.knowledge.loadHistory(),
+      this.dashboard.loadHistory(),
     ]);
   }
 }

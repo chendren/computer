@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { transcripts, analyses, sessions, logs, monitors, comparisons } from '../services/storage.js';
+import { transcripts, analyses, sessions, logs, monitors, comparisons, knowledge } from '../services/storage.js';
 import { broadcast } from '../services/websocket.js';
+import { notify, notifyAlert, notifyComplete } from '../services/notifications.js';
 
 const router = Router();
 
@@ -88,5 +89,50 @@ router.post('/comparisons', async (req, res) => {
   broadcast('comparison', item);
   res.json(item);
 });
+
+// Knowledge Base
+router.get('/knowledge', async (req, res) => {
+  res.json(await knowledge.list());
+});
+
+router.get('/knowledge/:id', async (req, res) => {
+  try {
+    res.json(await knowledge.get(req.params.id));
+  } catch {
+    res.status(404).json({ error: 'Knowledge entry not found' });
+  }
+});
+
+router.post('/knowledge', async (req, res) => {
+  const item = await knowledge.save(req.body);
+  broadcast('knowledge', item);
+  res.json(item);
+});
+
+// Notifications — wire into existing endpoints
+// Override analysis POST to also notify
+const _origAnalysis = router.stack.find(r => r.route?.path === '/analysis' && r.route?.methods?.post);
+if (_origAnalysis) {
+  const origHandler = _origAnalysis.route.stack[0].handle;
+  _origAnalysis.route.stack[0].handle = async (req, res) => {
+    await origHandler(req, res);
+    notifyComplete('Computer', `Analysis complete: ${req.body.title || 'New analysis'}`);
+  };
+}
+
+// Override monitor POST to notify on alerts
+const _origMonitor = router.stack.find(r => r.route?.path === '/monitors' && r.route?.methods?.post);
+if (_origMonitor) {
+  const origHandler = _origMonitor.route.stack[0].handle;
+  _origMonitor.route.stack[0].handle = async (req, res) => {
+    await origHandler(req, res);
+    const status = req.body.status || 'updated';
+    if (status === 'alert' || status === 'triggered') {
+      notifyAlert('Monitor Alert', `${req.body.name || 'Monitor'}: ${req.body.message || status}`);
+    } else {
+      notify('Monitor', `${req.body.name || 'Monitor'}: ${status}`);
+    }
+  };
+}
 
 export default router;

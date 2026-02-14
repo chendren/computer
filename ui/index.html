@@ -23,7 +23,8 @@
 
     <!-- Sidebar -->
     <nav id="lcars-sidebar">
-      <button class="lcars-button active" data-panel="main">Main</button>
+      <button class="lcars-button active" data-panel="dashboard">Dashboard</button>
+      <button class="lcars-button" data-panel="main">Main</button>
       <button class="lcars-button" data-panel="transcript">Transcript</button>
       <button class="lcars-button" data-panel="analysis">Analysis</button>
       <button class="lcars-button" data-panel="charts">Charts</button>
@@ -31,14 +32,26 @@
       <button class="lcars-button" data-panel="log">Log</button>
       <button class="lcars-button" data-panel="monitor">Monitor</button>
       <button class="lcars-button" data-panel="compare">Compare</button>
+      <button class="lcars-button" data-panel="knowledge">Knowledge</button>
       <div class="lcars-sidebar-spacer"></div>
       <div id="status-indicators"></div>
     </nav>
 
     <!-- Main Content -->
     <main id="lcars-main">
+      <!-- Dashboard Panel -->
+      <div id="panel-dashboard" class="panel active">
+        <div class="lcars-label">Bridge Console</div>
+        <div id="dashboard-content" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-icon">&#9670;</div>
+            <div class="empty-state-text">Loading Systems...</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Main / Conversation Panel -->
-      <div id="panel-main" class="panel active">
+      <div id="panel-main" class="panel">
         <div class="conversation-display" id="conversation-display">
           <div class="empty-state">
             <div class="empty-state-icon">&#9670;</div>
@@ -131,6 +144,20 @@
         <div id="comparison-results" style="flex:1; overflow-y:auto;">
           <div class="empty-state">
             <div class="empty-state-text">No comparisons yet</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Knowledge Panel -->
+      <div id="panel-knowledge" class="panel">
+        <div class="knowledge-controls">
+          <input type="text" class="search-input" id="knowledge-search" placeholder="Search knowledge base..." autocomplete="off">
+        </div>
+        <div class="lcars-divider"></div>
+        <div class="lcars-label">Knowledge Base</div>
+        <div id="knowledge-list" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">
+            <div class="empty-state-text">No knowledge entries</div>
           </div>
         </div>
       </div>

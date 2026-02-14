@@ -137,6 +137,8 @@ html, body {
 .lcars-button:nth-child(6) { background: var(--lcars-gold); }
 .lcars-button:nth-child(7) { background: var(--lcars-rose); }
 .lcars-button:nth-child(8) { background: var(--lcars-lavender); }
+.lcars-button:nth-child(9) { background: var(--lcars-orange); }
+.lcars-button:nth-child(10) { background: var(--lcars-green); }
 
 .lcars-button.active {
   filter: brightness(1.4);

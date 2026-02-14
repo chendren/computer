@@ -1,6 +1,22 @@
 import { escapeHtml, nowTime } from '../utils/formatters.js';
 import { clearEmpty } from '../utils/lcars-helpers.js';
 
+// Smart voice routing patterns — detect intent and suggest/auto-route commands
+const VOICE_ROUTES = [
+  { pattern: /^(computer,?\s+)?analyze\s+/i, command: '/computer:analyze', extract: (t) => t.replace(/^(computer,?\s+)?analyze\s+/i, '') },
+  { pattern: /^(computer,?\s+)?search\s+(for\s+)?/i, command: '/computer:search', extract: (t) => t.replace(/^(computer,?\s+)?search\s+(for\s+)?/i, '') },
+  { pattern: /^(computer,?\s+)?compare\s+/i, command: '/computer:compare', extract: (t) => t.replace(/^(computer,?\s+)?compare\s+/i, '') },
+  { pattern: /^(computer,?\s+)?summarize\s+/i, command: '/computer:summarize', extract: (t) => t.replace(/^(computer,?\s+)?summarize\s+/i, '') },
+  { pattern: /^(computer,?\s+)?monitor\s+/i, command: '/computer:monitor', extract: (t) => t.replace(/^(computer,?\s+)?monitor\s+/i, '') },
+  { pattern: /^(computer,?\s+)?translate\s+/i, command: '/computer:translate', extract: (t) => t.replace(/^(computer,?\s+)?translate\s+/i, '') },
+  { pattern: /^(computer,?\s+)?explain\s+/i, command: '/computer:explain', extract: (t) => t.replace(/^(computer,?\s+)?explain\s+/i, '') },
+  { pattern: /^(computer,?\s+)?(captain'?s?\s+)?log[\s:,]+/i, command: '/computer:log', extract: (t) => t.replace(/^(computer,?\s+)?(captain'?s?\s+)?log[\s:,]+/i, '') },
+  { pattern: /^(computer,?\s+)?remember\s+/i, command: '/computer:know', extract: (t) => `remember ${t.replace(/^(computer,?\s+)?remember\s+/i, '')}` },
+  { pattern: /^(computer,?\s+)?what do (we|you) know about\s+/i, command: '/computer:know', extract: (t) => t.replace(/^(computer,?\s+)?/i, '') },
+  { pattern: /^(computer,?\s+)?brief(ing)?$/i, command: '/computer:brief', extract: () => '' },
+  { pattern: /^(computer,?\s+)?status$/i, command: '/computer:status', extract: () => '' },
+];
+
 export class CommandInput {
   constructor(api, ws) {
     this.api = api;
@@ -87,6 +103,47 @@ export class CommandInput {
   setInputText(text) {
     this.input.value = text;
     this.input.focus();
+  }
+
+  /**
+   * Detect voice intent and return a route suggestion, or null.
+   */
+  detectVoiceRoute(text) {
+    for (const route of VOICE_ROUTES) {
+      if (route.pattern.test(text)) {
+        return { command: route.command, args: route.extract(text) };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Set input from voice with smart routing hint.
+   * Shows a suggestion badge if a command route is detected.
+   */
+  setInputFromVoice(text) {
+    const route = this.detectVoiceRoute(text);
+    if (route) {
+      // Auto-populate with the detected command + args
+      this.input.value = `${route.command} ${route.args}`.trim();
+      this.input.focus();
+      this._showRouteSuggestion(route.command);
+    } else {
+      this.input.value = text;
+      this.input.focus();
+    }
+  }
+
+  _showRouteSuggestion(command) {
+    // Remove any existing suggestion
+    const existing = document.querySelector('.voice-route-badge');
+    if (existing) existing.remove();
+
+    const badge = document.createElement('div');
+    badge.className = 'voice-route-badge';
+    badge.textContent = `Routed → ${command}`;
+    this.input.parentElement.appendChild(badge);
+    setTimeout(() => badge.remove(), 3000);
   }
 
   async _maybeSpeakResponse(text) {

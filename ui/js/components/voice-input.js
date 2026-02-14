@@ -29,7 +29,7 @@ export class VoiceInput {
       if (!listening && this.commandInput) {
         const fullText = this.speech.getAccumulatedText();
         if (fullText.trim()) {
-          this.commandInput.setInputText(fullText.trim());
+          this.commandInput.setInputFromVoice(fullText.trim());
         }
       }
     };
