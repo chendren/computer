@@ -17,6 +17,11 @@ export class ApiClient {
     return res.json();
   }
 
+  async delete(path) {
+    const res = await fetch(`${this.baseUrl}${path}`, { method: 'DELETE' });
+    return res.json();
+  }
+
   async uploadFile(path, file) {
     const form = new FormData();
     form.append('audio', file);

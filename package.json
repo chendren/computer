@@ -7,10 +7,11 @@
     "dev": "node --watch server/index.js"
   },
   "dependencies": {
+    "@lancedb/lancedb": "^0.26.2",
+    "cors": "^2.8.5",
     "express": "^4.21.0",
-    "ws": "^8.18.0",
     "multer": "^1.4.5-lts.1",
     "uuid": "^10.0.0",
-    "cors": "^2.8.5"
+    "ws": "^8.18.0"
   }
 }

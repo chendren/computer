@@ -151,10 +151,43 @@
       <!-- Knowledge Panel -->
       <div id="panel-knowledge" class="panel">
         <div class="knowledge-controls">
-          <input type="text" class="search-input" id="knowledge-search" placeholder="Search knowledge base..." autocomplete="off">
+          <div class="knowledge-search-row">
+            <input type="text" class="search-input" id="knowledge-search" placeholder="Search knowledge base..." autocomplete="off">
+            <select id="knowledge-search-method" class="lcars-select">
+              <option value="hybrid">Hybrid</option>
+              <option value="vector">Vector</option>
+              <option value="keyword">Keyword</option>
+              <option value="mmr">MMR</option>
+              <option value="multi_query">Multi-Query</option>
+            </select>
+            <button class="cmd-btn" id="knowledge-search-btn">Search</button>
+          </div>
+          <div class="knowledge-filters-row">
+            <select id="knowledge-filter-source" class="lcars-select-sm">
+              <option value="">All Sources</option>
+              <option value="user">User</option>
+              <option value="analysis">Analysis</option>
+              <option value="search">Search</option>
+              <option value="monitor">Monitor</option>
+              <option value="import">Import</option>
+            </select>
+            <select id="knowledge-filter-confidence" class="lcars-select-sm">
+              <option value="">All Confidence</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+            <input type="text" class="tag-filter-input" id="knowledge-filter-tags" placeholder="Filter tags..." autocomplete="off">
+            <span id="knowledge-result-count" class="knowledge-count"></span>
+          </div>
         </div>
         <div class="lcars-divider"></div>
-        <div class="lcars-label">Knowledge Base</div>
+        <div class="knowledge-tabs">
+          <button class="knowledge-tab active" data-view="entries">Entries</button>
+          <button class="knowledge-tab" data-view="results">Search Results</button>
+          <button class="knowledge-tab" data-view="stats">Stats</button>
+        </div>
+        <div class="lcars-label" id="knowledge-view-label">Knowledge Base</div>
         <div id="knowledge-list" style="flex:1; overflow-y:auto;">
           <div class="empty-state">
             <div class="empty-state-text">No knowledge entries</div>

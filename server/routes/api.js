@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { transcripts, analyses, sessions, logs, monitors, comparisons, knowledge } from '../services/storage.js';
+import { transcripts, analyses, sessions, logs, monitors, comparisons } from '../services/storage.js';
 import { broadcast } from '../services/websocket.js';
 import { notify, notifyAlert, notifyComplete } from '../services/notifications.js';
 
@@ -87,25 +87,6 @@ router.get('/comparisons', async (req, res) => {
 router.post('/comparisons', async (req, res) => {
   const item = await comparisons.save(req.body);
   broadcast('comparison', item);
-  res.json(item);
-});
-
-// Knowledge Base
-router.get('/knowledge', async (req, res) => {
-  res.json(await knowledge.list());
-});
-
-router.get('/knowledge/:id', async (req, res) => {
-  try {
-    res.json(await knowledge.get(req.params.id));
-  } catch {
-    res.status(404).json({ error: 'Knowledge entry not found' });
-  }
-});
-
-router.post('/knowledge', async (req, res) => {
-  const item = await knowledge.save(req.body);
-  broadcast('knowledge', item);
   res.json(item);
 });
 

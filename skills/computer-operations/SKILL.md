@@ -32,7 +32,11 @@ All POST endpoints broadcast to connected WebSocket clients for real-time displa
 | GET/POST | /api/logs | Captain's log entries |
 | GET/POST | /api/monitors | Monitor status tracking (+ alert notifications) |
 | GET/POST | /api/comparisons | Side-by-side comparisons |
-| GET/POST | /api/knowledge | Knowledge base entries |
+| GET/POST | /api/knowledge | Knowledge base entries (LanceDB vector storage) |
+| POST | /api/knowledge/search | Semantic search with method selection |
+| DELETE | /api/knowledge/:id | Remove knowledge entry and all chunks |
+| POST | /api/knowledge/bulk | Bulk ingest multiple documents |
+| GET | /api/knowledge/stats | Knowledge base statistics |
 | POST | /api/tts/speak | Generate spoken response |
 | POST | /api/claude/query | Stream Claude response (SSE) |
 | POST | /api/transcribe/file | Upload audio for Whisper transcription |
@@ -124,7 +128,7 @@ JSON files in `${CLAUDE_PLUGIN_ROOT}/data/`:
 - `logs/` — Captain's log entries
 - `monitors/` — Monitor configurations and status
 - `comparisons/` — Comparison results
-- `knowledge/` — Knowledge base entries with facts, tags, confidence
+- `vectordb/` — LanceDB vector database (knowledge embeddings, chunks, metadata)
 
 ## Cross-Referencing Prior Results
 
@@ -167,14 +171,45 @@ curl -X POST http://localhost:3141/api/comparisons -H 'Content-Type: application
 curl -X POST http://localhost:3141/api/knowledge -H 'Content-Type: application/json' -d @/tmp/computer-knowledge.json
 ```
 
-## Knowledge Base JSON Format
+## Vector Knowledge Base
 
+The knowledge base uses LanceDB for vector storage with Ollama nomic-embed-text (768-dim) for embeddings.
+
+### Chunking Strategies
+- `fixed` — N-character chunks with overlap
+- `sentence` — Split on sentence boundaries (default for short facts)
+- `paragraph` — Split on double newlines (default for medium text)
+- `sliding` — Fixed window with configurable step
+- `semantic` — Split when embedding similarity drops below threshold
+- `recursive` — Split by headers, then paragraphs, then sentences (default for long docs)
+
+### Search Methods
+- `vector` — Cosine similarity nearest neighbors
+- `keyword` — BM25-style text search
+- `hybrid` — Combined vector + keyword (default, best general-purpose)
+- `mmr` — Maximal Marginal Relevance (diversity-promoting)
+- `multi_query` — Multiple query variations merged via Reciprocal Rank Fusion
+
+### Knowledge Ingestion Format
 ```json
 {
-  "fact": "The key fact or information",
-  "source": "user|analysis|search|monitor",
+  "text": "The content to store",
+  "title": "Optional title",
+  "source": "user|analysis|search|monitor|import",
   "confidence": "high|medium|low",
-  "tags": ["tag1", "tag2"]
+  "tags": ["tag1", "tag2"],
+  "chunk_strategy": "paragraph",
+  "chunk_options": {}
+}
+```
+
+### Knowledge Search Format
+```json
+{
+  "query": "search text",
+  "method": "hybrid",
+  "limit": 10,
+  "metadata_filter": { "source": "user", "confidence": "high", "tags": ["tag"] }
 }
 ```
 

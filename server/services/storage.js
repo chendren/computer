@@ -80,3 +80,4 @@ export const comparisons = {
   get: (id) => getItem('comparisons', id),
   save: (data) => saveItem('comparisons', { type: 'comparison', ...data }),
 };
+
