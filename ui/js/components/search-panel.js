@@ -7,18 +7,24 @@ export class SearchPanel {
     this.searchInput = document.getElementById('search-input');
     this.searchBtn = document.getElementById('search-btn');
 
-    this.searchBtn.addEventListener('click', () => this.search());
-    this.searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') this.search();
-    });
+    if (this.searchBtn) {
+      this.searchBtn.addEventListener('click', () => this.search());
+    }
+    if (this.searchInput) {
+      this.searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') this.search();
+      });
+    }
   }
 
   async search() {
-    const query = this.searchInput.value.trim();
+    const query = this.searchInput?.value?.trim();
     if (!query) return;
 
-    this.searchBtn.disabled = true;
-    this.searchBtn.textContent = 'Searching...';
+    if (this.searchBtn) {
+      this.searchBtn.disabled = true;
+      this.searchBtn.textContent = 'Searching...';
+    }
 
     try {
       const systemPrompt = 'You are a research assistant. Search the web for the query and return results as JSON: {"results": [{"title": "...", "url": "...", "snippet": "..."}], "summary": "brief synthesis"}';
@@ -45,8 +51,10 @@ export class SearchPanel {
       this.displayRaw('Search error: ' + err.message);
     }
 
-    this.searchBtn.disabled = false;
-    this.searchBtn.textContent = 'Search';
+    if (this.searchBtn) {
+      this.searchBtn.disabled = false;
+      this.searchBtn.textContent = 'Search';
+    }
   }
 
   displayResults(data) {

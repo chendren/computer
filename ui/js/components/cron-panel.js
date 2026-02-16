@@ -25,10 +25,11 @@ export class CronPanel {
   }
 
   handleCronEvent(data) {
+    if (!data || typeof data !== 'object') return;
     this.eventLog.unshift({
       time: new Date().toLocaleTimeString(),
-      jobId: data.jobId || 'cron',
-      status: data.status || 'fired',
+      jobId: String(data.jobId || 'cron'),
+      status: String(data.status || 'fired'),
     });
     if (this.eventLog.length > 50) this.eventLog.pop();
     this.renderEventLog();

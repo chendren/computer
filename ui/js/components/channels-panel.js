@@ -45,6 +45,13 @@ export class ChannelsPanel {
     this.threadMessages = [];
     this.threadSubject = '';
     this.selectedThreadId = null;
+    this.gmailStatus = null;
+    this.inboxSummary = null;
+    this.priorityView = false;
+    this.followups = [];
+    this.showFollowups = false;
+    this.threadSummary = null;
+    this._followupsLoading = false;
 
     this.ws.on('channel_message', (data) => {
       this.handleIncomingMessage(data);
@@ -52,14 +59,58 @@ export class ChannelsPanel {
   }
 
   async loadHistory() {
+    // Load Gmail status directly (bypasses gateway)
+    try {
+      this.gmailStatus = await this.api.get('/gmail/status');
+    } catch {
+      this.gmailStatus = null;
+    }
+
+    // Also try gateway channels
     try {
       const data = await this.api.get('/gateway/channels');
       this.channels = data.channels || [];
-      // Load OAuth status in parallel
       this.loadOAuthStatus();
-      this.render();
     } catch {
+      this.channels = [];
+    }
+
+    // Always show Gmail as a channel if credentials exist
+    if (this.gmailStatus && this.gmailStatus.hasCredentials) {
+      const hasGmail = this.channels.some(ch => {
+        const id = typeof ch === 'string' ? ch : (ch.id || ch.name || '');
+        return id.toLowerCase() === 'gmail';
+      });
+      if (!hasGmail) {
+        this.channels.unshift({
+          id: 'gmail',
+          name: 'Gmail',
+          connected: this.gmailStatus.connected,
+          email: this.gmailStatus.email,
+          direct: true,
+        });
+      }
+    } else if (this.gmailStatus === null || (this.gmailStatus && !this.gmailStatus.hasCredentials)) {
+      // Show Gmail as available but needs setup
+      const hasGmail = this.channels.some(ch => {
+        const id = typeof ch === 'string' ? ch : (ch.id || ch.name || '');
+        return id.toLowerCase() === 'gmail';
+      });
+      if (!hasGmail) {
+        this.channels.unshift({
+          id: 'gmail',
+          name: 'Gmail',
+          connected: false,
+          direct: true,
+          needsSetup: !this.gmailStatus?.hasCredentials,
+        });
+      }
+    }
+
+    if (this.channels.length === 0) {
       this.renderOffline();
+    } else {
+      this.render();
     }
   }
 
@@ -89,11 +140,90 @@ export class ChannelsPanel {
     this.messages = [];
     this.showConfig = false;
     this.attachments = [];
-    this.activeView = 'compose';
     this.inbox = { messages: [], total: 0, offset: 0, folder: 'inbox' };
     this.threadMessages = [];
     this.selectedThreadId = null;
-    this.render();
+    this.inboxSummary = null;
+    this.priorityView = false;
+    this.followups = [];
+    this.showFollowups = false;
+    this.threadSummary = null;
+
+    // Gmail defaults to inbox view
+    if (this._isGmailSelected(channelId)) {
+      this.activeView = 'inbox';
+      this.switchView('inbox').then(() => {
+        // Auto-load intelligence in background
+        this.loadPriorities();
+        this.loadInboxSummary();
+      });
+    } else {
+      this.activeView = 'compose';
+      this.render();
+    }
+  }
+
+  _isGmailSelected(channelId) {
+    const id = (channelId || '').toLowerCase();
+    return id === 'gmail' || id === 'email';
+  }
+
+  // ── Gmail Intelligence ──────────────────────────────
+
+  async loadInboxSummary() {
+    try {
+      this.inboxSummary = { loading: true };
+      this.render();
+      this.inboxSummary = await this.api.get('/gmail/summary');
+      this.render();
+    } catch {
+      this.inboxSummary = null;
+      this.render();
+    }
+  }
+
+  async loadPriorities() {
+    try {
+      this.priorityView = true;
+      this.render();
+      const data = await this.api.get('/gmail/priorities');
+      this.inbox.messages = data.messages || [];
+      this.render();
+    } catch {
+      this.priorityView = false;
+      this.render();
+    }
+  }
+
+  async loadFollowups() {
+    try {
+      this.showFollowups = true;
+      this._followupsLoading = true;
+      this.followups = [];
+      this.render();
+      const data = await this.api.get('/gmail/followups');
+      this.followups = data.followups || [];
+      this._followupsLoading = false;
+      this.render();
+    } catch {
+      this._followupsLoading = false;
+      this.followups = [];
+      this.render();
+    }
+  }
+
+  async loadThreadSummary() {
+    if (!this.selectedThreadId) return;
+    try {
+      this.threadSummary = { loading: true };
+      this.render();
+      const tid = encodeURIComponent(this.selectedThreadId);
+      this.threadSummary = await this.api.get(`/gmail/threads/${tid}/summary`);
+      this.render();
+    } catch {
+      this.threadSummary = null;
+      this.render();
+    }
   }
 
   getFeatures(channelId) {
@@ -156,7 +286,80 @@ export class ChannelsPanel {
 
   // ── Send ─────────────────────────────────────────
 
+  async sendGmail() {
+    const to = this.container?.querySelector('.gmail-to-input')?.value?.trim();
+    const subject = this.container?.querySelector('.gmail-subject-input')?.value?.trim();
+    const body = this.container?.querySelector('.gmail-body-input')?.value?.trim();
+    if (!to || !body) return;
+
+    const sendBtn = this.container?.querySelector('.gmail-send-btn');
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending...'; }
+
+    try {
+      const payload = { to, subject: subject || '', body };
+      // If replying to a thread
+      if (this.selectedThreadId && this.activeView === 'thread') {
+        payload.threadId = this.selectedThreadId;
+        // Find the last message's Message-ID for threading
+        const lastMsg = this.threadMessages[this.threadMessages.length - 1];
+        if (lastMsg && lastMsg.messageId) payload.inReplyTo = lastMsg.messageId;
+      }
+      const result = await this.api.post('/gmail/send', payload);
+      // Clear compose form
+      const toInput = this.container?.querySelector('.gmail-to-input');
+      const subjectInput = this.container?.querySelector('.gmail-subject-input');
+      const bodyInput = this.container?.querySelector('.gmail-body-input');
+      if (toInput) toInput.value = '';
+      if (subjectInput) subjectInput.value = '';
+      if (bodyInput) bodyInput.value = '';
+      this._gmailSentConfirm = `Sent to ${to}`;
+      this.render();
+      // Clear confirmation after 3 seconds
+      setTimeout(() => { this._gmailSentConfirm = null; this.render(); }, 3000);
+    } catch (err) {
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = 'Send'; }
+      alert('Send failed: ' + (err.message || 'Unknown error'));
+    }
+  }
+
+  async replyGmail() {
+    const input = this.container?.querySelector('.channel-send-input');
+    const body = input?.value?.trim();
+    if (!body || !this.selectedThreadId) return;
+
+    const replyBtn = this.container?.querySelector('.channel-send-btn');
+    if (replyBtn) { replyBtn.disabled = true; replyBtn.textContent = 'Sending...'; }
+
+    try {
+      // Get the original sender to reply to
+      const lastMsg = this.threadMessages[this.threadMessages.length - 1];
+      const to = lastMsg?.from || '';
+      const subject = this.threadSubject.startsWith('Re:') ? this.threadSubject : 'Re: ' + this.threadSubject;
+      const payload = { to, subject, body, threadId: this.selectedThreadId };
+      if (lastMsg && lastMsg.messageId) payload.inReplyTo = lastMsg.messageId;
+
+      await this.api.post('/gmail/send', payload);
+      input.value = '';
+      // Add to local thread display
+      this.threadMessages.push({
+        from: this.gmailStatus?.email || 'me',
+        body,
+        date: new Date().toISOString(),
+      });
+      this.render();
+    } catch (err) {
+      if (replyBtn) { replyBtn.disabled = false; replyBtn.textContent = 'Reply'; }
+      alert('Reply failed: ' + (err.message || 'Unknown error'));
+    }
+  }
+
   async sendMessage() {
+    // Gmail uses dedicated send methods
+    if (this._isGmailChannel()) {
+      if (this.activeView === 'thread') return this.replyGmail();
+      return this.sendGmail();
+    }
+
     const input = this.container?.querySelector('.channel-send-input');
     const text = input?.value.trim();
     if (!text || !this.selectedChannel) return;
@@ -234,6 +437,12 @@ export class ChannelsPanel {
   // ── OAuth ────────────────────────────────────────
 
   async startOAuth(provider) {
+    // Gmail uses direct OAuth flow
+    if (provider === 'gmail') {
+      window.open('/api/gmail/auth/start', 'oauth_gmail', 'width=600,height=700');
+      this.pollGmailOAuth();
+      return;
+    }
     try {
       const data = await this.api.post(`/gateway/oauth/${encodeURIComponent(provider)}/start`, {});
       if (data.authUrl) {
@@ -246,6 +455,29 @@ export class ChannelsPanel {
     } catch (err) {
       console.error('OAuth start failed:', err);
     }
+  }
+
+  async pollGmailOAuth() {
+    let attempts = 0;
+    const check = async () => {
+      attempts++;
+      if (attempts > 60) return;
+      try {
+        this.gmailStatus = await this.api.get('/gmail/status');
+        if (this.gmailStatus.connected) {
+          // Update channel state
+          const ch = this.channels.find(c => (typeof c === 'string' ? c : c.id) === 'gmail');
+          if (ch && typeof ch === 'object') {
+            ch.connected = true;
+            ch.email = this.gmailStatus.email;
+          }
+          this.render();
+          return;
+        }
+      } catch {}
+      setTimeout(check, 2000);
+    };
+    setTimeout(check, 3000);
   }
 
   async pollOAuthComplete(provider) {
@@ -266,6 +498,21 @@ export class ChannelsPanel {
 
   async revokeOAuth(provider) {
     if (!confirm(`Revoke ${provider} authorization?`)) return;
+    if (provider === 'gmail') {
+      try {
+        await this.api.post('/gmail/auth/revoke');
+        this.gmailStatus = { connected: false, hasCredentials: true };
+        const ch = this.channels.find(c => (typeof c === 'string' ? c : c.id) === 'gmail');
+        if (ch && typeof ch === 'object') {
+          ch.connected = false;
+          ch.email = null;
+        }
+        this.render();
+      } catch (err) {
+        console.error('Gmail revoke failed:', err);
+      }
+      return;
+    }
     try {
       await this.api.post(`/gateway/oauth/${encodeURIComponent(provider)}/revoke`);
       await this.loadOAuthStatus();
@@ -286,6 +533,26 @@ export class ChannelsPanel {
   }
 
   async loadInbox(offset = 0) {
+    // Gmail uses direct API
+    if (this._isGmailChannel()) {
+      try {
+        const data = await this.api.get(`/gmail/inbox?max=25`);
+        this.inbox.messages = data.messages || [];
+        this.inbox.total = data.total || 0;
+        this.inbox.offset = 0;
+      } catch {
+        this.inbox.messages = [];
+      }
+      try {
+        const data = await this.api.get('/gmail/labels');
+        this.folders = (data.labels || [])
+          .filter(l => l.type === 'system' || l.type === 'user')
+          .map(l => ({ name: l.name, id: l.id, count: l.messagesTotal }));
+      } catch {
+        this.folders = [];
+      }
+      return;
+    }
     try {
       const id = encodeURIComponent(this.selectedChannel);
       const folder = encodeURIComponent(this.inbox.folder);
@@ -306,6 +573,12 @@ export class ChannelsPanel {
     }
   }
 
+  _isGmailChannel() {
+    if (!this.selectedChannel) return false;
+    const id = this.selectedChannel.toLowerCase();
+    return id === 'gmail' || id === 'email';
+  }
+
   async switchFolder(folder) {
     this.inbox.folder = folder;
     await this.loadInbox(0);
@@ -315,15 +588,33 @@ export class ChannelsPanel {
   async openThread(threadId, subject) {
     this.selectedThreadId = threadId;
     this.threadSubject = subject || '';
+    this.threadSummary = null;
     this.activeView = 'thread';
-    try {
-      const id = encodeURIComponent(this.selectedChannel);
-      const tid = encodeURIComponent(threadId);
-      const data = await this.api.get(`/gateway/channels/${id}/threads/${tid}`);
-      this.threadMessages = data.messages || [];
-      if (data.subject) this.threadSubject = data.subject;
-    } catch {
-      this.threadMessages = [];
+    if (this._isGmailChannel()) {
+      try {
+        const tid = encodeURIComponent(threadId);
+        const data = await this.api.get(`/gmail/threads/${tid}`);
+        this.threadMessages = data.messages || [];
+        if (data.subject) this.threadSubject = data.subject;
+      } catch {
+        this.threadMessages = [];
+      }
+      // Mark as read in Gmail
+      const msgInInbox = this.inbox.messages.find(msg => msg.threadId === threadId || msg.id === threadId);
+      if (msgInInbox && msgInInbox.unread) {
+        msgInInbox.unread = false;
+        this.api.post(`/gmail/messages/${encodeURIComponent(msgInInbox.id)}/read`).catch(() => {});
+      }
+    } else {
+      try {
+        const id = encodeURIComponent(this.selectedChannel);
+        const tid = encodeURIComponent(threadId);
+        const data = await this.api.get(`/gateway/channels/${id}/threads/${tid}`);
+        this.threadMessages = data.messages || [];
+        if (data.subject) this.threadSubject = data.subject;
+      } catch {
+        this.threadMessages = [];
+      }
     }
     this.render();
   }
@@ -349,14 +640,23 @@ export class ChannelsPanel {
       const selected = this.selectedChannel === id ? 'selected' : '';
       const features = this.getFeatures(id);
       const oauthKey = features.oauth;
-      const oauthOk = oauthKey && this.oauthStatus[oauthKey]?.authorized;
+      const isDirect = typeof ch === 'object' && ch.direct;
+      const email = typeof ch === 'object' ? ch.email : null;
+      const needsSetup = typeof ch === 'object' ? ch.needsSetup : false;
+
+      // For Gmail direct: use gmailStatus
+      const oauthOk = isDirect && oauthKey === 'gmail'
+        ? this.gmailStatus?.connected
+        : (oauthKey && this.oauthStatus[oauthKey]?.authorized);
+
       return `<div class="channel-card ${statusClass} ${selected}" data-channel="${escapeHtml(id)}">
         <div class="channel-indicator"></div>
         <div class="channel-name">${escapeHtml(features.label)}</div>
-        <div class="channel-status-label">${connected ? 'ONLINE' : 'OFFLINE'}</div>
+        ${email ? `<div class="channel-email">${escapeHtml(email)}</div>` : ''}
+        <div class="channel-status-label">${connected ? 'ONLINE' : needsSetup ? 'SETUP' : 'OFFLINE'}</div>
         <div class="channel-card-footer">
           <div class="channel-format-badge">${features.format}</div>
-          ${oauthKey ? `<div class="channel-oauth-badge ${oauthOk ? 'authorized' : 'unauthorized'}">${oauthOk ? 'AUTH' : 'NO AUTH'}</div>` : ''}
+          ${oauthKey ? `<div class="channel-oauth-badge ${oauthOk ? 'authorized' : 'unauthorized'}">${oauthOk ? 'AUTH' : needsSetup ? 'SETUP' : 'NO AUTH'}</div>` : ''}
         </div>
       </div>`;
     }).join('');
@@ -398,6 +698,32 @@ export class ChannelsPanel {
   }
 
   renderComposeView(features, hasMedia) {
+    // Gmail gets a dedicated compose form
+    if (this._isGmailChannel() && this.gmailStatus?.connected) {
+      return `
+        <div class="gmail-compose">
+          ${this._gmailSentConfirm ? `<div class="gmail-sent-confirm">${escapeHtml(this._gmailSentConfirm)}</div>` : ''}
+          <div class="gmail-compose-fields">
+            <div class="gmail-field-row">
+              <label class="gmail-field-label">TO</label>
+              <input type="text" class="command-input gmail-to-input" placeholder="recipient@example.com" autocomplete="off">
+            </div>
+            <div class="gmail-field-row">
+              <label class="gmail-field-label">SUBJECT</label>
+              <input type="text" class="command-input gmail-subject-input" placeholder="Subject..." autocomplete="off">
+            </div>
+            <div class="gmail-field-row gmail-body-row">
+              <textarea class="command-input gmail-body-input" placeholder="Write your message..." rows="8"></textarea>
+            </div>
+          </div>
+          <div class="gmail-compose-actions">
+            <button class="cmd-btn gmail-send-btn" style="background:var(--lcars-green)">Send</button>
+            <span class="gmail-compose-hint">Sending as ${escapeHtml(this.gmailStatus?.email || 'connected account')}</span>
+          </div>
+        </div>
+      `;
+    }
+
     return `
       <div class="channel-feed" id="channel-feed"></div>
       ${hasMedia ? `<div class="attachment-preview"></div>` : ''}
@@ -413,6 +739,67 @@ export class ChannelsPanel {
   }
 
   renderInboxView(features) {
+    // Gmail intelligence toolbar
+    let intelToolbar = '';
+    if (this._isGmailChannel() && this.gmailStatus?.connected) {
+      const unreadCount = this.inbox.messages.filter(m => m.unread).length;
+      const totalCount = this.inbox.messages.length;
+      intelToolbar = `<div class="gmail-intel-toolbar">
+        <div class="gmail-inbox-stats">
+          <span class="inbox-stat">${totalCount} messages</span>
+          ${unreadCount > 0 ? `<span class="inbox-stat inbox-stat-unread">${unreadCount} unread</span>` : '<span class="inbox-stat inbox-stat-clear">all read</span>'}
+        </div>
+        <div class="gmail-intel-buttons">
+          <button class="cmd-btn gmail-summarize-btn ${this.inboxSummary && !this.inboxSummary.loading ? 'done' : ''}" style="font-size:11px;padding:4px 12px;">${this.inboxSummary?.loading ? 'Analyzing...' : 'Summarize'}</button>
+          <button class="cmd-btn gmail-priorities-btn ${this.priorityView ? 'active' : ''}" style="font-size:11px;padding:4px 12px;">${this.priorityView && !this.inbox.messages.some(m => m.priority) ? 'Loading...' : 'Priorities'}</button>
+          <button class="cmd-btn gmail-followups-btn ${this.showFollowups ? 'active' : ''}" style="font-size:11px;padding:4px 12px;">Follow-ups</button>
+          <button class="cmd-btn gmail-refresh-btn" style="font-size:11px;padding:4px 12px;">Refresh</button>
+        </div>
+      </div>`;
+    }
+
+    // Inbox summary card
+    let summaryHtml = '';
+    if (this.inboxSummary) {
+      if (this.inboxSummary.loading) {
+        summaryHtml = `<div class="inbox-summary-card"><span class="lcars-loading"></span> Analyzing inbox...</div>`;
+      } else {
+        const urgent = (this.inboxSummary.urgentItems || []).map(u =>
+          `<div class="summary-urgent-item"><span class="priority-badge priority-urgent">URGENT</span> ${escapeHtml(u.from || '')}: ${escapeHtml(u.subject || '')} — ${escapeHtml(u.reason || '')}</div>`
+        ).join('');
+        const needsReply = (this.inboxSummary.needsReply || []).map(n =>
+          `<div class="summary-reply-item"><span class="priority-badge priority-action">REPLY</span> ${escapeHtml(n.from || '')}: ${escapeHtml(n.subject || '')}</div>`
+        ).join('');
+        summaryHtml = `<div class="inbox-summary-card">
+          <div class="summary-text">${escapeHtml(this.inboxSummary.summary || '')}</div>
+          ${(this.inboxSummary.keyTopics || []).length > 0 ? `<div class="summary-topics">${this.inboxSummary.keyTopics.map(t => `<span class="summary-topic-tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+          ${urgent}${needsReply}
+        </div>`;
+      }
+    }
+
+    // Follow-ups panel
+    let followupsHtml = '';
+    if (this.showFollowups) {
+      if (this.followups.length === 0 && this._followupsLoading) {
+        followupsHtml = `<div class="followup-panel"><div class="empty-state" style="min-height:auto;padding:12px"><div class="empty-state-text" style="font-size:12px">Analyzing follow-ups...</div></div></div>`;
+      } else if (this.followups.length === 0) {
+        followupsHtml = `<div class="followup-panel"><div class="empty-state" style="min-height:auto;padding:12px"><div class="empty-state-text" style="font-size:12px">No follow-ups needed. Your inbox is clear.</div></div></div>`;
+      } else {
+        followupsHtml = `<div class="followup-panel">
+          ${this.followups.map(f => {
+            const urgencyCls = f.urgency === 'high' ? 'priority-urgent' : f.urgency === 'medium' ? 'priority-action' : 'priority-fyi';
+            return `<div class="followup-item">
+              <span class="priority-badge ${urgencyCls}">${escapeHtml(f.type || 'follow-up')}</span>
+              <span class="followup-from">${escapeHtml(f.from || '')}</span>
+              <span class="followup-subject">${escapeHtml(f.subject || '')}</span>
+              <div class="followup-reason">${escapeHtml(f.reason || '')}</div>
+            </div>`;
+          }).join('')}
+        </div>`;
+      }
+    }
+
     const folderList = this.folders.length > 0
       ? `<div class="inbox-folders">
           ${this.folders.map(f => {
@@ -424,28 +811,30 @@ export class ChannelsPanel {
       : '';
 
     const msgs = this.inbox.messages;
+
+    // Group messages by priority when priority data available
+    const hasPriority = msgs.some(m => m.priority && m.priority !== 'fyi');
+    let groupedMsgHtml = '';
+    if (hasPriority) {
+      const order = ['urgent', 'action-required', 'fyi', 'promotional', 'automated'];
+      const groupLabels = { urgent: 'REQUIRES ATTENTION', 'action-required': 'ACTION NEEDED', fyi: 'INFORMATIONAL', promotional: 'PROMOTIONS', automated: 'AUTOMATED' };
+      for (const pri of order) {
+        const group = msgs.filter(m => m.priority === pri);
+        if (group.length === 0) continue;
+        groupedMsgHtml += `<div class="inbox-group-header">${groupLabels[pri] || pri.toUpperCase()} (${group.length})</div>`;
+        groupedMsgHtml += group.map(m => this._renderInboxItem(m)).join('');
+      }
+      // Any without priority
+      const ungrouped = msgs.filter(m => !m.priority || !order.includes(m.priority));
+      if (ungrouped.length > 0) {
+        groupedMsgHtml += `<div class="inbox-group-header">OTHER (${ungrouped.length})</div>`;
+        groupedMsgHtml += ungrouped.map(m => this._renderInboxItem(m)).join('');
+      }
+    }
+
     const msgList = msgs.length === 0
       ? `<div class="empty-state"><div class="empty-state-text">No messages in ${escapeHtml(this.inbox.folder)}</div></div>`
-      : `<div class="inbox-list">
-          ${msgs.map(m => {
-            const from = m.from || m.sender || m.nick || 'unknown';
-            const subject = m.subject || m.text?.slice(0, 80) || '(no subject)';
-            const date = m.date || m.timestamp || '';
-            const unread = m.unread !== false;
-            const threadId = m.threadId || m.id || m.messageId || '';
-            const snippet = m.snippet || m.preview || m.text?.slice(0, 120) || '';
-            const hasAttachments = m.attachments?.length > 0 || m.hasAttachments;
-            return `<div class="inbox-item ${unread ? 'unread' : ''}" data-thread="${escapeHtml(threadId)}" data-subject="${escapeHtml(subject)}">
-              <div class="inbox-item-header">
-                <span class="inbox-from">${escapeHtml(from)}</span>
-                ${hasAttachments ? '<span class="inbox-attach-icon">&#128206;</span>' : ''}
-                <span class="inbox-date">${date ? formatTime(date) : ''}</span>
-              </div>
-              <div class="inbox-subject">${escapeHtml(subject)}</div>
-              ${snippet ? `<div class="inbox-snippet">${escapeHtml(snippet)}</div>` : ''}
-            </div>`;
-          }).join('')}
-        </div>`;
+      : `<div class="inbox-list">${hasPriority ? groupedMsgHtml : msgs.map(m => this._renderInboxItem(m)).join('')}</div>`;
 
     const pageTotal = this.inbox.total;
     const pageStart = this.inbox.offset + 1;
@@ -459,10 +848,38 @@ export class ChannelsPanel {
       : '';
 
     return `
+      ${intelToolbar}
+      ${summaryHtml}
+      ${followupsHtml}
       ${folderList}
       ${msgList}
       ${pagination}
     `;
+  }
+
+  _renderInboxItem(m) {
+    const from = m.from || m.sender || m.nick || 'unknown';
+    const displayFrom = from.split('<')[0].trim() || from;
+    const subject = m.subject || m.text?.slice(0, 80) || '(no subject)';
+    const date = m.date || m.timestamp || '';
+    const unread = m.unread !== false;
+    const threadId = m.threadId || m.id || m.messageId || '';
+    const snippet = m.snippet || m.preview || m.text?.slice(0, 120) || '';
+    const hasAttachments = m.attachments?.length > 0 || m.hasAttachments;
+    const priority = m.priority || '';
+    const priorityCls = priority ? `priority-${priority}` : '';
+    const dimClass = (priority === 'promotional' || priority === 'automated') ? 'inbox-item-dim' : '';
+    return `<div class="inbox-item ${unread ? 'unread' : ''} ${dimClass}" data-thread="${escapeHtml(threadId)}" data-subject="${escapeHtml(subject)}">
+      <div class="inbox-item-header">
+        ${priority ? `<span class="priority-badge ${priorityCls}">${escapeHtml(priority)}</span>` : ''}
+        <span class="inbox-from">${escapeHtml(displayFrom)}</span>
+        ${hasAttachments ? '<span class="inbox-attach-icon">&#128206;</span>' : ''}
+        <span class="inbox-date">${date ? formatTime(date) : ''}</span>
+      </div>
+      <div class="inbox-subject">${escapeHtml(subject)}</div>
+      ${snippet && !dimClass ? `<div class="inbox-snippet">${escapeHtml(snippet)}</div>` : ''}
+      ${m.priorityReason && !dimClass ? `<div class="inbox-priority-reason">${escapeHtml(m.priorityReason)}</div>` : ''}
+    </div>`;
   }
 
   renderThreadView(features, hasMedia) {
@@ -487,11 +904,34 @@ export class ChannelsPanel {
           </div>`;
         }).join('');
 
+    // Thread summary for Gmail
+    let threadSummaryHtml = '';
+    if (this._isGmailChannel()) {
+      if (this.threadSummary) {
+        if (this.threadSummary.loading) {
+          threadSummaryHtml = `<div class="inbox-summary-card"><span class="lcars-loading"></span> Summarizing thread...</div>`;
+        } else {
+          const actions = (this.threadSummary.actionItems || []).map(a =>
+            `<div class="summary-action-item"><span class="priority-badge priority-action">ACTION</span> ${escapeHtml(a.assignee || '')}: ${escapeHtml(a.action || '')}</div>`
+          ).join('');
+          threadSummaryHtml = `<div class="inbox-summary-card">
+            <div class="summary-text">${escapeHtml(this.threadSummary.summary || '')}</div>
+            ${(this.threadSummary.keyPoints || []).length > 0 ? `<div class="summary-topics">${this.threadSummary.keyPoints.map(p => `<span class="summary-topic-tag">${escapeHtml(p)}</span>`).join('')}</div>` : ''}
+            ${(this.threadSummary.decisions || []).length > 0 ? `<div class="summary-decisions">${this.threadSummary.decisions.map(d => `<div class="summary-decision"><span class="priority-badge priority-fyi">DECISION</span> ${escapeHtml(d)}</div>`).join('')}</div>` : ''}
+            ${actions}
+            <div class="summary-status">Status: <span class="priority-badge priority-${this.threadSummary.status === 'needs-reply' ? 'urgent' : this.threadSummary.status === 'pending' ? 'action' : 'fyi'}">${escapeHtml(this.threadSummary.status || 'unknown')}</span></div>
+          </div>`;
+        }
+      }
+    }
+
     return `
       <div class="thread-header">
         <button class="cmd-btn thread-back-btn" style="font-size:11px;padding:4px 12px;">Back</button>
         <span class="lcars-label" style="margin:0">${escapeHtml(this.threadSubject)}</span>
+        ${this._isGmailChannel() ? `<button class="cmd-btn thread-summarize-btn" style="font-size:11px;padding:4px 12px;">Summarize</button>` : ''}
       </div>
+      ${threadSummaryHtml}
       <div class="thread-feed">${msgHtml}</div>
       ${hasMedia ? `<div class="attachment-preview"></div>` : ''}
       <div class="channel-send-area">
@@ -508,7 +948,32 @@ export class ChannelsPanel {
     const oauthKey = features?.oauth;
 
     let oauthHtml = '';
-    if (oauthKey) {
+    // Gmail uses direct OAuth — check gmailStatus
+    if (oauthKey === 'gmail' && this._isGmailChannel()) {
+      const authorized = this.gmailStatus?.connected;
+      const email = this.gmailStatus?.email || '';
+      const needsSetup = !this.gmailStatus?.hasCredentials;
+      oauthHtml = `<div class="channel-oauth-section">
+        <div class="lcars-label" style="margin-bottom:8px">Authorization — Gmail</div>
+        ${needsSetup
+          ? `<div class="oauth-status-row">
+              <span class="oauth-status unauthorized">NEEDS SETUP</span>
+              <div class="oauth-hint">Create <code>data/google-oauth.json</code> with your <code>clientId</code> and <code>clientSecret</code> from Google Cloud Console.</div>
+            </div>`
+          : authorized
+            ? `<div class="oauth-status-row">
+                <span class="oauth-status authorized">AUTHORIZED</span>
+                ${email ? `<span class="oauth-email">${escapeHtml(email)}</span>` : ''}
+                <button class="cmd-btn oauth-revoke-btn" data-provider="gmail" style="font-size:11px;padding:4px 10px;background:var(--lcars-red)">Revoke</button>
+              </div>`
+            : `<div class="oauth-status-row">
+                <span class="oauth-status unauthorized">NOT AUTHORIZED</span>
+                <button class="cmd-btn oauth-start-btn" data-provider="gmail" style="font-size:11px;padding:4px 10px;background:var(--lcars-green)">Connect Gmail</button>
+              </div>`
+        }
+        <div class="oauth-hint">Authorizes Gmail API access for reading, sending, and managing email through this channel.</div>
+      </div>`;
+    } else if (oauthKey) {
       const status = this.oauthStatus[oauthKey];
       const authorized = status?.authorized;
       const email = status?.email || status?.user || '';
@@ -632,6 +1097,36 @@ export class ChannelsPanel {
     // Thread back
     const backBtn = this.container.querySelector('.thread-back-btn');
     if (backBtn) backBtn.addEventListener('click', () => this.switchView('inbox'));
+
+    // Gmail intelligence buttons
+    const summarizeBtn = this.container.querySelector('.gmail-summarize-btn');
+    if (summarizeBtn) summarizeBtn.addEventListener('click', () => this.loadInboxSummary());
+
+    const prioritiesBtn = this.container.querySelector('.gmail-priorities-btn');
+    if (prioritiesBtn) prioritiesBtn.addEventListener('click', () => this.loadPriorities());
+
+    const followupsBtn = this.container.querySelector('.gmail-followups-btn');
+    if (followupsBtn) followupsBtn.addEventListener('click', () => this.loadFollowups());
+
+    const refreshBtn = this.container.querySelector('.gmail-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', async () => {
+      this.inboxSummary = null;
+      this.priorityView = false;
+      this.followups = [];
+      this.showFollowups = false;
+      await this.loadInbox();
+      this.render();
+      // Re-trigger intelligence
+      this.loadPriorities();
+      this.loadInboxSummary();
+    });
+
+    const threadSumBtn = this.container.querySelector('.thread-summarize-btn');
+    if (threadSumBtn) threadSumBtn.addEventListener('click', () => this.loadThreadSummary());
+
+    // Gmail compose send button
+    const gmailSendBtn = this.container.querySelector('.gmail-send-btn');
+    if (gmailSendBtn) gmailSendBtn.addEventListener('click', () => this.sendGmail());
 
     // Render feed if on compose view
     if (this.activeView === 'compose') this.renderMessageFeed();

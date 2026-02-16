@@ -104,6 +104,11 @@ class ComputerApp {
       this.switchPanel('knowledge');
     });
 
+    // Alert status — visual overlay for red/yellow/blue alert
+    this.ws.on('alert_status', (data) => {
+      this._setAlertStatus(data.level, data.reason);
+    });
+
     this.ws.on('status', (data) => {
       if (data.message) this.statusBar.setActivity(data.message);
       // Speak short status messages when flagged
@@ -118,7 +123,7 @@ class ComputerApp {
         const urlInput = document.getElementById('browser-url-input');
         if (urlInput) urlInput.value = data.url;
         this.switchPanel('browser');
-        this.browser.navigate();
+        this.browser.navigate(data.url);
       }
     });
 
@@ -170,6 +175,47 @@ class ComputerApp {
         this.audio.speak(result.audioUrl);
       }
     } catch {}
+  }
+
+  _setAlertStatus(level, reason) {
+    // Remove any existing alert overlay
+    const existing = document.getElementById('alert-overlay');
+    if (existing) existing.remove();
+    document.body.classList.remove('alert-red', 'alert-yellow', 'alert-blue');
+
+    if (level === 'normal') return;
+
+    document.body.classList.add(`alert-${level}`);
+    const overlay = document.createElement('div');
+    overlay.id = 'alert-overlay';
+    overlay.className = `alert-overlay alert-${level}`;
+    const label = document.createElement('div');
+    label.className = 'alert-label';
+    label.textContent = `${level.toUpperCase()} ALERT`;
+    overlay.appendChild(label);
+    if (reason) {
+      const reasonEl = document.createElement('div');
+      reasonEl.className = 'alert-reason';
+      reasonEl.textContent = reason;
+      overlay.appendChild(reasonEl);
+    }
+    const dismissBtn = document.createElement('button');
+    dismissBtn.className = 'cmd-btn alert-dismiss';
+    dismissBtn.textContent = 'Acknowledge';
+    dismissBtn.addEventListener('click', () => {
+      overlay.remove();
+      document.body.classList.remove(`alert-${level}`);
+    });
+    overlay.appendChild(dismissBtn);
+    document.body.appendChild(overlay);
+
+    // Auto-dismiss after 30 seconds
+    setTimeout(() => {
+      if (overlay.parentNode) {
+        overlay.remove();
+        document.body.classList.remove(`alert-${level}`);
+      }
+    }, 30000);
   }
 
   switchPanel(panelId) {

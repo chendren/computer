@@ -50,6 +50,7 @@ app.use(helmet({
       imgSrc: ["'self'", 'data:', 'blob:'],
       connectSrc: ["'self'", `ws://localhost:${PORT}`, `ws://127.0.0.1:${PORT}`, "blob:", "https://cdn.jsdelivr.net"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      frameSrc: ["'self'"],
       objectSrc: ["'none'"],
       workerSrc: ["'self'", "blob:"],
       mediaSrc: ["'self'", "blob:"],
@@ -156,9 +157,9 @@ app.get('/api/health', async (req, res) => {
       uptime: gwStatus.uptime,
     },
   };
-  // Provide auth token to same-origin UI (CORS blocks cross-origin access)
+  // Provide auth token to same-origin UI (strict origin check)
   const origin = req.get('origin') || '';
-  if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+  if (!origin || origin === `http://localhost:${PORT}` || origin === `http://127.0.0.1:${PORT}`) {
     response.authToken = getAuthToken();
   }
   res.json(response);

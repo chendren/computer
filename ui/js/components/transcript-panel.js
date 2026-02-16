@@ -1,4 +1,3 @@
-import { nowTime } from '../utils/formatters.js';
 import { clearEmpty } from '../utils/lcars-helpers.js';
 
 export class TranscriptPanel {
@@ -16,103 +15,201 @@ export class TranscriptPanel {
     if (clearBtn) clearBtn.addEventListener('click', () => this.clearList());
   }
 
-  addEntry(data) {
-    clearEmpty(this.list);
+  _computeStardate() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const startOfYear = new Date(year, 0, 1);
+    const dayOfYear = Math.floor((now - startOfYear) / 86400000);
+    const dayFraction = Math.floor((dayOfYear / 365) * 1000);
+    return (year - 1924) + '.' + dayFraction;
+  }
+
+  _formatTime(timestamp) {
+    if (timestamp) {
+      return new Date(timestamp).toLocaleTimeString('en-US', { hour12: false });
+    }
+    return new Date().toLocaleTimeString('en-US', { hour12: false });
+  }
+
+  _buildEntry(text, stardate, time, markup) {
     const entry = document.createElement('div');
     entry.className = 'transcript-entry';
 
-    const time = data.timestamp ? new Date(data.timestamp).toLocaleTimeString('en-US', { hour12: false }) : nowTime();
-    const source = data.source === 'whisper' ? '[' + (data.filename || 'file') + ']' : '';
-    const text = data.text || '';
+    // Header: Stardate + time
+    const header = document.createElement('div');
+    header.className = 'transcript-header';
+
+    const sdSpan = document.createElement('span');
+    sdSpan.className = 'transcript-stardate';
+    sdSpan.textContent = 'Stardate ' + (stardate || this._computeStardate());
+    header.appendChild(sdSpan);
 
     const timeSpan = document.createElement('span');
     timeSpan.className = 'transcript-time';
-    timeSpan.textContent = time + ' ' + source;
+    timeSpan.textContent = time || this._formatTime();
+    header.appendChild(timeSpan);
 
-    const textSpan = document.createElement('span');
-    textSpan.className = 'transcript-text';
-    textSpan.textContent = text;
+    entry.appendChild(header);
 
-    const actions = document.createElement('div');
-    actions.className = 'transcript-entry-actions';
+    // Text
+    const textEl = document.createElement('div');
+    textEl.className = 'transcript-text';
+    textEl.textContent = text || '';
+    entry.appendChild(textEl);
 
-    const analyzeBtn = document.createElement('button');
-    analyzeBtn.className = 'analyze-btn';
-    analyzeBtn.textContent = 'Analyze';
-    analyzeBtn.addEventListener('click', () => this._analyzeEntry(text, analyzeBtn));
-    actions.appendChild(analyzeBtn);
+    // Markup container
+    const markupEl = document.createElement('div');
+    markupEl.className = 'log-markup';
+    entry.appendChild(markupEl);
 
-    entry.appendChild(timeSpan);
-    entry.appendChild(textSpan);
-    entry.appendChild(actions);
-
-    this.list.appendChild(entry);
-    this.list.scrollTop = this.list.scrollHeight;
-  }
-
-  async _analyzeEntry(text, btn) {
-    if (!text.trim()) return;
-    btn.disabled = true;
-    btn.textContent = 'Analyzing...';
-
-    try {
-      const title = text.length > 50 ? text.slice(0, 50) + '...' : text;
-      await this.api.post('/analysis', { text, title });
-      btn.textContent = 'Done';
-    } catch {
-      btn.textContent = 'Error';
+    // Render existing markup if provided
+    if (markup) {
+      this._renderMarkup(markupEl, markup);
     }
 
-    setTimeout(() => {
-      btn.textContent = 'Analyze';
-      btn.disabled = false;
-    }, 3000);
+    return entry;
+  }
+
+  _renderMarkup(container, markup) {
+    container.innerHTML = '';
+
+    const sections = [
+      { key: 'issues', label: 'ISSUE', cls: 'issue' },
+      { key: 'actions', label: 'ACTION', cls: 'action' },
+      { key: 'outcomes', label: 'OUTCOME', cls: 'outcome' },
+    ];
+
+    for (const section of sections) {
+      const items = markup[section.key];
+      if (!items || !items.length) continue;
+
+      for (const item of items) {
+        const tag = document.createElement('div');
+        tag.className = 'markup-tag ' + section.cls;
+
+        const label = document.createElement('span');
+        label.className = 'markup-label';
+        label.textContent = section.label;
+        tag.appendChild(label);
+
+        const text = document.createElement('span');
+        text.className = 'markup-text';
+        text.textContent = item;
+        tag.appendChild(text);
+
+        container.appendChild(tag);
+      }
+    }
+  }
+
+  _showMarkupSpinner(container) {
+    container.innerHTML = '<div class="markup-spinner"><span class="lcars-loading"></span> Analyzing log entry...</div>';
+  }
+
+  async _fetchMarkup(text, markupContainer) {
+    if (!text || text.trim().length < 10) return;
+
+    this._showMarkupSpinner(markupContainer);
+
+    try {
+      const markup = await this.api.post('/transcripts/markup', { text });
+      const hasContent = (markup.issues && markup.issues.length) ||
+                         (markup.actions && markup.actions.length) ||
+                         (markup.outcomes && markup.outcomes.length);
+      if (hasContent) {
+        this._renderMarkup(markupContainer, markup);
+      } else {
+        markupContainer.innerHTML = '';
+      }
+    } catch {
+      markupContainer.innerHTML = '';
+    }
+  }
+
+  addEntry(data) {
+    clearEmpty(this.list);
+
+    const stardate = data.stardate || null;
+    const time = this._formatTime(data.timestamp);
+    const text = data.text || '';
+
+    const entry = this._buildEntry(text, stardate, time, data.markup || null);
+    this.list.appendChild(entry);
+    this.list.scrollTop = this.list.scrollHeight;
   }
 
   addLiveText(text, isFinal) {
     clearEmpty(this.list);
 
     if (isFinal) {
-      // Finalize the interim element
+      const stardate = this._computeStardate();
+      const time = this._formatTime();
+
       if (this.interimEl) {
-        this.interimEl.querySelector('.transcript-text').textContent = text;
+        // Upgrade interim element to final
         this.interimEl.style.opacity = '1';
 
-        // Add analyze button if not present
-        if (!this.interimEl.querySelector('.analyze-btn')) {
-          const actions = document.createElement('div');
-          actions.className = 'transcript-entry-actions';
-          const analyzeBtn = document.createElement('button');
-          analyzeBtn.className = 'analyze-btn';
-          analyzeBtn.textContent = 'Analyze';
-          analyzeBtn.addEventListener('click', () => this._analyzeEntry(text, analyzeBtn));
-          actions.appendChild(analyzeBtn);
-          this.interimEl.appendChild(actions);
+        // Add stardate to header
+        let header = this.interimEl.querySelector('.transcript-header');
+        if (!header) {
+          header = document.createElement('div');
+          header.className = 'transcript-header';
+          this.interimEl.insertBefore(header, this.interimEl.firstChild);
         }
+        if (!header.querySelector('.transcript-stardate')) {
+          const sdSpan = document.createElement('span');
+          sdSpan.className = 'transcript-stardate';
+          sdSpan.textContent = 'Stardate ' + stardate;
+          header.insertBefore(sdSpan, header.firstChild);
+        }
+
+        // Update text
+        const textEl = this.interimEl.querySelector('.transcript-text');
+        if (textEl) textEl.textContent = text;
+
+        // Add markup container
+        let markupEl = this.interimEl.querySelector('.log-markup');
+        if (!markupEl) {
+          markupEl = document.createElement('div');
+          markupEl.className = 'log-markup';
+          this.interimEl.appendChild(markupEl);
+        }
+
+        // Save to server and fetch markup
+        this.api.post('/transcripts', { text, source: 'voice', stardate }).catch(() => {});
+        this._fetchMarkup(text, markupEl);
 
         this.interimEl = null;
       } else {
-        this.addEntry({ text, source: 'voice' });
-      }
+        // No interim element — create final entry directly
+        const entry = this._buildEntry(text, stardate, time);
+        this.list.appendChild(entry);
+        this.list.scrollTop = this.list.scrollHeight;
 
-      // Save to server
-      this.api.post('/transcripts', { text, source: 'voice' }).catch(() => {});
+        // Save and fetch markup
+        this.api.post('/transcripts', { text, source: 'voice', stardate }).catch(() => {});
+        const markupEl = entry.querySelector('.log-markup');
+        if (markupEl) this._fetchMarkup(text, markupEl);
+      }
     } else {
-      // Update or create interim element
+      // Interim — show partial text at half opacity
       if (!this.interimEl) {
         this.interimEl = document.createElement('div');
         this.interimEl.className = 'transcript-entry';
         this.interimEl.style.opacity = '0.5';
 
+        const header = document.createElement('div');
+        header.className = 'transcript-header';
         const timeSpan = document.createElement('span');
         timeSpan.className = 'transcript-time';
-        timeSpan.textContent = nowTime();
+        timeSpan.textContent = this._formatTime();
+        header.appendChild(timeSpan);
+        this.interimEl.appendChild(header);
 
-        const textSpan = document.createElement('span');
-        textSpan.className = 'transcript-text';
+        const textEl = document.createElement('div');
+        textEl.className = 'transcript-text';
+        this.interimEl.appendChild(textEl);
 
-        this.interimEl.appendChild(timeSpan);
-        this.interimEl.appendChild(textSpan);
         this.list.appendChild(this.interimEl);
       }
       this.interimEl.querySelector('.transcript-text').textContent = text;
@@ -128,14 +225,16 @@ export class TranscriptPanel {
     entries.forEach(function(entry) {
       const textEl = entry.querySelector('.transcript-text');
       if (textEl && textEl.textContent.trim()) {
-        texts.push(textEl.textContent.trim());
+        const sdEl = entry.querySelector('.transcript-stardate');
+        const prefix = sdEl ? sdEl.textContent + ': ' : '';
+        texts.push(prefix + textEl.textContent.trim());
       }
     });
 
     if (!texts.length) return;
 
     const now = new Date();
-    const title = 'Session ' + now.toLocaleDateString('en-US') + ' ' + now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    const title = "Captain's Log " + now.toLocaleDateString('en-US') + ' ' + now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
 
     if (this.saveStatus) this.saveStatus.textContent = 'Saving...';
 
@@ -145,7 +244,7 @@ export class TranscriptPanel {
         source: 'session',
         title: title,
       });
-      if (this.saveStatus) this.saveStatus.textContent = 'Saved';
+      if (this.saveStatus) this.saveStatus.textContent = 'Logged';
     } catch {
       if (this.saveStatus) this.saveStatus.textContent = 'Error';
     }
@@ -154,7 +253,7 @@ export class TranscriptPanel {
   }
 
   clearList() {
-    this.list.innerHTML = '<div class="empty-state"><div class="empty-state-text">No transcripts yet</div></div>';
+    this.list.innerHTML = '<div class="empty-state"><div class="empty-state-text">No log entries recorded, Captain</div></div>';
     this.interimEl = null;
   }
 

@@ -47,8 +47,8 @@ export function getAuthToken() {
  * Express middleware — require valid bearer token on API routes.
  */
 export function requireAuth(req, res, next) {
-  // Exempt: health endpoint, TTS audio files (UUID filenames), static files
-  if (req.path === '/api/health' || req.path.startsWith('/api/tts/audio/')) {
+  // Exempt: health endpoint, TTS audio files (UUID filenames), Gmail OAuth callback, static files
+  if (req.path === '/api/health' || req.path.startsWith('/api/tts/audio/') || req.path === '/api/gmail/auth/callback' || req.path === '/api/gmail/auth/start') {
     return next();
   }
 
@@ -58,12 +58,18 @@ export function requireAuth(req, res, next) {
   }
 
   const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Authentication required. Provide Authorization: Bearer <token> header.' });
+  // Also accept token as query param for iframe-based requests (e.g. /api/browse/proxy)
+  let token = null;
+  if (header && header.startsWith('Bearer ')) {
+    token = header.slice(7);
+  } else if (req.query && req.query.token) {
+    token = req.query.token;
   }
 
-  const token = header.slice(7);
-  if (!authToken || !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(authToken))) {
+  if (!token) {
+    return res.status(401).json({ error: 'Authentication required. Provide Authorization: Bearer <token> header.' });
+  }
+  if (!authToken || token.length !== authToken.length || !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(authToken))) {
     return res.status(403).json({ error: 'Invalid authentication token.' });
   }
 

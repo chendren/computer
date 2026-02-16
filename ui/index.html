@@ -29,7 +29,7 @@
       <div class="lcars-nav-group-label">Core</div>
       <button class="lcars-button active" data-panel="dashboard">Dashboard</button>
       <button class="lcars-button" data-panel="main">Main</button>
-      <button class="lcars-button" data-panel="transcript">Transcript</button>
+      <button class="lcars-button" data-panel="transcript">Captain's Log</button>
       <button class="lcars-button" data-panel="analysis">Analysis</button>
       <button class="lcars-button" data-panel="charts">Charts</button>
       <button class="lcars-button" data-panel="knowledge">Knowledge</button>
@@ -90,15 +90,15 @@
           </div>
         </div>
         <div class="transcript-session-controls">
-          <button class="cmd-btn cmd-btn-sm" id="transcript-save-btn">Save Session</button>
+          <button class="cmd-btn cmd-btn-sm" id="transcript-save-btn">Save Log</button>
           <button class="cmd-btn cmd-btn-sm" id="transcript-clear-btn">Clear</button>
           <span id="transcript-save-status" class="status-segment"></span>
         </div>
         <div class="lcars-divider"></div>
-        <div class="lcars-label">Live Transcript</div>
+        <div class="lcars-label">Captain's Log</div>
         <div class="transcript-list" id="transcript-list">
           <div class="empty-state">
-            <div class="empty-state-text">No transcripts yet</div>
+            <div class="empty-state-text">No log entries recorded, Captain</div>
           </div>
         </div>
       </div>
@@ -316,11 +316,16 @@
         <div class="browser-controls">
           <input type="text" class="search-input" id="browser-url-input" placeholder="Enter URL..." autocomplete="off">
           <button class="cmd-btn" id="browser-go-btn">Navigate</button>
+          <button class="cmd-btn btn-small" id="browser-view-toggle" title="Toggle rendered/text view">Text</button>
         </div>
         <div class="lcars-divider"></div>
-        <div class="lcars-label">Viewscreen</div>
-        <div id="browser-content" style="flex:1; overflow-y:auto;">
-          <div class="browser-viewport">
+        <div class="browser-status-bar">
+          <span class="lcars-label">Viewscreen</span>
+          <span id="browser-page-info" class="browser-page-info"></span>
+        </div>
+        <div id="browser-content" style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+          <iframe id="browser-iframe" class="browser-iframe" sandbox="allow-scripts allow-same-origin" style="flex:1; display:block;"></iframe>
+          <div class="browser-viewport" id="browser-text-view" style="flex:1; overflow-y:auto; display:none;">
             <div class="empty-state">
               <div class="empty-state-text">Enter a URL to navigate</div>
             </div>

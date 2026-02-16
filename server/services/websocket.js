@@ -50,16 +50,22 @@ async function processChunk(ws, audioBuffer) {
 }
 
 /**
- * Detect audio format from buffer header bytes.
- * WAV files start with "RIFF", everything else assumed webm.
+ * Detect audio format from buffer header bytes (magic number detection).
  */
 function detectAudioFormat(buffer) {
-  if (buffer.length >= 4 &&
-      buffer[0] === 0x52 && buffer[1] === 0x49 &&
-      buffer[2] === 0x46 && buffer[3] === 0x46) {
-    return 'wav';
-  }
-  return 'webm';
+  if (buffer.length < 4) return 'webm';
+  // WAV: "RIFF"
+  if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46) return 'wav';
+  // WebM/MKV: 0x1A 0x45 0xDF 0xA3
+  if (buffer[0] === 0x1A && buffer[1] === 0x45 && buffer[2] === 0xDF && buffer[3] === 0xA3) return 'webm';
+  // MP3: 0xFF 0xFB or 0xFF 0xF3 or 0xFF 0xF2 or ID3
+  if ((buffer[0] === 0xFF && (buffer[1] & 0xE0) === 0xE0) ||
+      (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33)) return 'mp3';
+  // FLAC: "fLaC"
+  if (buffer[0] === 0x66 && buffer[1] === 0x4C && buffer[2] === 0x61 && buffer[3] === 0x43) return 'flac';
+  // OGG: "OggS"
+  if (buffer[0] === 0x4F && buffer[1] === 0x67 && buffer[2] === 0x67 && buffer[3] === 0x53) return 'ogg';
+  return 'webm'; // Default fallback
 }
 
 // ── Web search & fetch helpers ────────────────────────────
@@ -330,9 +336,12 @@ Rules:
  */
 async function _parseChartIntent(query) {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
     const res = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
       body: JSON.stringify({
         model: VOICE_MODEL,
         messages: [
@@ -343,6 +352,7 @@ async function _parseChartIntent(query) {
         temperature: 0,
       }),
     });
+    clearTimeout(timeout);
 
     const data = await res.json();
     const content = (data.choices?.[0]?.message?.content || '').trim();
@@ -476,9 +486,12 @@ async function _llmExtractData(text, subject) {
   try {
     // Truncate to fit context window
     const truncated = text.slice(0, 8000);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
     const res = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
       body: JSON.stringify({
         model: VOICE_MODEL,
         messages: [
@@ -489,6 +502,7 @@ async function _llmExtractData(text, subject) {
         temperature: 0,
       }),
     });
+    clearTimeout(timeout);
     const data = await res.json();
     const content = (data.choices?.[0]?.message?.content || '').trim();
     const jsonStr = content.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
@@ -497,7 +511,15 @@ async function _llmExtractData(text, subject) {
       // Validate all values are numeric
       const validValues = parsed.values.every(v => typeof v === 'number' && !isNaN(v));
       if (validValues) {
-        console.log(`[chart] LLM extracted ${parsed.labels.length} data points for "${subject}" (unit: ${parsed.unit || 'unknown'})`);
+        // Hallucination guard: check that at least 30% of labels appear in source text
+        const sourceText = truncated.toLowerCase();
+        const matchingLabels = parsed.labels.filter(l => sourceText.includes(String(l).toLowerCase()));
+        const labelMatchRatio = matchingLabels.length / parsed.labels.length;
+        if (labelMatchRatio < 0.3) {
+          console.warn(`[chart] Hallucination guard: only ${matchingLabels.length}/${parsed.labels.length} labels found in source text for "${subject}"`);
+          return null;
+        }
+        console.log(`[chart] LLM extracted ${parsed.labels.length} data points for "${subject}" (unit: ${parsed.unit || 'unknown'}, label match: ${Math.round(labelMatchRatio * 100)}%)`);
         return { labels: parsed.labels.map(String), values: parsed.values, unit: parsed.unit || '' };
       }
     }
@@ -631,8 +653,8 @@ async function _smartChartExecutor(input, broadcastFn) {
     }
 
     const title = seriesData.length > 1
-      ? `${seriesData.map(d => d.name).join(' vs ')} — Last ${range.count} ${range.unit}${range.count > 1 ? 's' : ''}`
-      : `${seriesData[0].name} Price — Last ${range.count} ${range.unit}${range.count > 1 ? 's' : ''}`;
+      ? `${seriesData.map(d => d.name).join(' vs ')} — Last ${range.count} ${range.unit}${range.count > 1 ? 's' : ''} (simulated trend)`
+      : `${seriesData[0].name} Price — Last ${range.count} ${range.unit}${range.count > 1 ? 's' : ''} (simulated trend, current price live)`;
 
     // Table mode: build tabular data instead of chart
     if (chartType === 'table') {
@@ -828,12 +850,86 @@ function createToolExecutor(baseUrl, ws) {
         return await res.json();
       }
       case 'create_log': {
+        const logData = { text: input.text };
+        if (input.stardate) logData.stardate = input.stardate;
+        if (input.category) logData.category = input.category;
         const res = await fetch(`${baseUrl}/api/logs`, {
           method: 'POST',
           headers: authHeaders(),
-          body: JSON.stringify({ text: input.text }),
+          body: JSON.stringify(logData),
         });
         return await res.json();
+      }
+      case 'get_time': {
+        const now = new Date();
+        const year = now.getFullYear();
+        const startOfYear = new Date(year, 0, 1);
+        const dayOfYear = Math.floor((now - startOfYear) / 86400000);
+        const dayFraction = Math.floor((dayOfYear / 365) * 1000);
+        const stardate = `${year - 1924}.${dayFraction}`;
+        return {
+          time: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          date: now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+          stardate,
+          iso: now.toISOString(),
+        };
+      }
+      case 'set_alert': {
+        const level = input.level || 'red';
+        const reason = input.reason || '';
+        broadcast('alert_status', { level, reason, timestamp: new Date().toISOString() });
+        broadcast('status', { message: `${level.toUpperCase()} ALERT${reason ? ': ' + reason : ''}`, speak: true });
+        return { ok: true, level, reason };
+      }
+      case 'compare_data': {
+        const res = await fetch(`${baseUrl}/api/comparisons`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            textA: input.textA,
+            textB: input.textB,
+            nameA: input.nameA || 'Subject A',
+            nameB: input.nameB || 'Subject B',
+          }),
+        });
+        return await res.json();
+      }
+      case 'create_reminder': {
+        let delayMs;
+        if (input.delay_minutes) {
+          delayMs = input.delay_minutes * 60 * 1000;
+        } else if (input.time) {
+          // Parse time like "14:00" or "2pm"
+          const now = new Date();
+          let hours, minutes = 0;
+          const t = input.time.toLowerCase().trim();
+          if (t.includes(':')) {
+            const parts = t.split(':');
+            hours = parseInt(parts[0], 10);
+            minutes = parseInt(parts[1], 10) || 0;
+          } else {
+            hours = parseInt(t, 10);
+            if (t.includes('pm') && hours < 12) hours += 12;
+            if (t.includes('am') && hours === 12) hours = 0;
+          }
+          const target = new Date(now);
+          target.setHours(hours, minutes, 0, 0);
+          if (target <= now) target.setDate(target.getDate() + 1);
+          delayMs = target - now;
+        } else {
+          delayMs = 15 * 60 * 1000; // Default 15 minutes
+        }
+        const fireAt = new Date(Date.now() + delayMs);
+        const reminderId = setTimeout(() => {
+          broadcast('status', { message: `REMINDER: ${input.message}`, speak: true });
+          broadcast('alert_status', { level: 'blue', reason: input.message });
+        }, delayMs);
+        return {
+          ok: true,
+          message: input.message,
+          fireAt: fireAt.toISOString(),
+          fireIn: Math.round(delayMs / 60000) + ' minutes',
+        };
       }
       case 'display_on_screen': {
         broadcast('voice_panel_switch', { panel: input.panel });
@@ -879,7 +975,9 @@ function createToolExecutor(baseUrl, ws) {
         return { transcripts, logs };
       }
       case 'generate_chart': {
-        return await _smartChartExecutor(input, broadcast);
+        // Scope chart to requesting client, not all clients
+        const clientBroadcast = (type, data) => sendTo(ws, type, data);
+        return await _smartChartExecutor(input, clientBroadcast);
       }
       case 'browse_url': {
         broadcast('browser_navigate', { url: input.url });
@@ -913,6 +1011,71 @@ function createToolExecutor(baseUrl, ws) {
         } catch (err) {
           return { error: `Search+read failed: ${err.message}` };
         }
+      }
+      case 'check_email': {
+        const res = await fetch(`${baseUrl}/api/gmail/inbox?max=10`, { headers: authHeaders() });
+        return await res.json();
+      }
+      case 'summarize_inbox': {
+        const res = await fetch(`${baseUrl}/api/gmail/summary`, { headers: authHeaders() });
+        return await res.json();
+      }
+      case 'check_followups': {
+        const res = await fetch(`${baseUrl}/api/gmail/followups`, { headers: authHeaders() });
+        return await res.json();
+      }
+      case 'read_email': {
+        // Search for the email, then read the first result
+        const q = input.query || '';
+        const searchRes = await fetch(`${baseUrl}/api/gmail/search?q=${encodeURIComponent(q)}&max=1`, { headers: authHeaders() });
+        const searchData = await searchRes.json();
+        const msgs = searchData.messages || [];
+        if (msgs.length === 0) return { messages: [], error: 'No matching email found' };
+        // Get full message
+        const msgRes = await fetch(`${baseUrl}/api/gmail/messages/${encodeURIComponent(msgs[0].id)}`, { headers: authHeaders() });
+        return await msgRes.json();
+      }
+      case 'send_email': {
+        const { to, subject, body } = input;
+        // If we have all fields, send directly
+        if (to && body) {
+          const sendRes = await fetch(`${baseUrl}/api/gmail/send`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ to, subject: subject || '', body }),
+          });
+          const result = await sendRes.json();
+          return { sent: true, to, subject, ...result };
+        }
+        // Otherwise signal to open compose
+        return { drafted: !!to, to: to || '', subject: subject || '', body: body || '' };
+      }
+      case 'reply_email': {
+        const { query, body } = input;
+        // Find the email to reply to
+        const searchRes2 = await fetch(`${baseUrl}/api/gmail/search?q=${encodeURIComponent(query || '')}&max=1`, { headers: authHeaders() });
+        const searchData2 = await searchRes2.json();
+        const msgs2 = searchData2.messages || [];
+        if (msgs2.length === 0) return { found: false, error: 'No matching email found' };
+        const original = msgs2[0];
+        // If we have a body, send the reply
+        if (body) {
+          const replySubject = (original.subject || '').startsWith('Re:') ? original.subject : 'Re: ' + (original.subject || '');
+          const sendRes = await fetch(`${baseUrl}/api/gmail/send`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({
+              to: original.from || '',
+              subject: replySubject,
+              body,
+              threadId: original.threadId,
+            }),
+          });
+          const result = await sendRes.json();
+          return { sent: true, to: original.from, subject: replySubject, ...result };
+        }
+        // Otherwise just report we found it
+        return { found: true, from: original.from, subject: original.subject, threadId: original.threadId };
       }
       default:
         return { error: `Unknown tool: ${toolName}` };
@@ -961,7 +1124,10 @@ async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
       }
     }
 
-    // panelSwitch broadcast is handled by the display_on_screen tool executor
+    // Broadcast panel switch for any tool that requests it
+    if (result.panelSwitch) {
+      sendTo(ws, 'voice_panel_switch', { panel: result.panelSwitch });
+    }
 
     sendTo(ws, 'voice_response', {
       text: result.text,
@@ -989,7 +1155,7 @@ export function initWebSocket(wss, baseUrl) {
     const url = new URL(req.url, 'http://localhost');
     const token = url.searchParams.get('token');
     const authToken = getAuthToken();
-    if (authToken && token !== authToken) {
+    if (!authToken || token !== authToken) {
       ws.close(4001, 'Authentication required');
       return;
     }
@@ -1024,7 +1190,7 @@ export function initWebSocket(wss, baseUrl) {
                   sendTo(ws, 'voice_error', { error: err.message || 'Voice processing failed' });
                 });
               } else if (!available) {
-                sendTo(ws, 'voice_error', { error: 'Ollama not available or required models (qwen2.5-7b, xlam) not found' });
+                sendTo(ws, 'voice_error', { error: 'Ollama not available or required models not found. Need: ' + (process.env.VOICE_MODEL || 'llama4:scout') + ' and ' + (process.env.ACTION_MODEL || 'xLAM F16') });
               }
             });
             break;

@@ -14,17 +14,21 @@ export class ComparisonPanel {
     this.submitBtn = document.getElementById('compare-submit-btn');
     this.statusEl = document.getElementById('compare-status');
 
-    this.submitBtn.addEventListener('click', () => this.submitComparison());
+    if (this.submitBtn) {
+      this.submitBtn.addEventListener('click', () => this.submitComparison());
+    }
   }
 
   async submitComparison() {
-    const textA = this.textA.value.trim();
-    const textB = this.textB.value.trim();
+    const textA = this.textA?.value?.trim();
+    const textB = this.textB?.value?.trim();
     if (!textA || !textB) return;
 
-    this.submitBtn.disabled = true;
-    this.submitBtn.textContent = 'Comparing...';
-    this.statusEl.textContent = '';
+    if (this.submitBtn) {
+      this.submitBtn.disabled = true;
+      this.submitBtn.textContent = 'Comparing...';
+    }
+    if (this.statusEl) this.statusEl.innerHTML = '<span class="lcars-loading"></span>';
 
     try {
       await this.api.post('/comparisons', {
@@ -33,20 +37,26 @@ export class ComparisonPanel {
         nameA: this.nameA.value.trim() || 'Subject A',
         nameB: this.nameB.value.trim() || 'Subject B',
       });
-      this.textA.value = '';
-      this.textB.value = '';
-      this.nameA.value = '';
-      this.nameB.value = '';
-      this.statusEl.textContent = 'COMPLETE';
-      this.statusEl.style.color = '#55CC55';
-      setTimeout(() => { this.statusEl.textContent = ''; }, 2000);
+      if (this.textA) this.textA.value = '';
+      if (this.textB) this.textB.value = '';
+      if (this.nameA) this.nameA.value = '';
+      if (this.nameB) this.nameB.value = '';
+      if (this.statusEl) {
+        this.statusEl.textContent = 'COMPLETE';
+        this.statusEl.style.color = '#55CC55';
+        setTimeout(() => { this.statusEl.textContent = ''; }, 2000);
+      }
     } catch (err) {
-      this.statusEl.textContent = 'ERROR';
-      this.statusEl.style.color = '#CC4444';
+      if (this.statusEl) {
+        this.statusEl.textContent = 'ERROR';
+        this.statusEl.style.color = '#CC4444';
+      }
     }
 
-    this.submitBtn.disabled = false;
-    this.submitBtn.textContent = 'Compare';
+    if (this.submitBtn) {
+      this.submitBtn.disabled = false;
+      this.submitBtn.textContent = 'Compare';
+    }
   }
 
   display(data) {

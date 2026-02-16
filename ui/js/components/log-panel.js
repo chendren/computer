@@ -12,36 +12,48 @@ export class LogPanel {
     this.submitBtn = document.getElementById('log-submit-btn');
     this.statusEl = document.getElementById('log-status');
 
-    this.submitBtn.addEventListener('click', () => this.submitLog());
-    this.input.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') this.submitLog();
-    });
+    if (this.submitBtn) {
+      this.submitBtn.addEventListener('click', () => this.submitLog());
+    }
+    if (this.input) {
+      this.input.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') this.submitLog();
+      });
+    }
   }
 
   async submitLog() {
-    const text = this.input.value.trim();
+    const text = this.input?.value?.trim();
     if (!text) return;
 
-    this.submitBtn.disabled = true;
-    this.submitBtn.textContent = 'Recording...';
-    this.statusEl.textContent = '';
+    if (this.submitBtn) {
+      this.submitBtn.disabled = true;
+      this.submitBtn.textContent = 'Recording...';
+    }
+    if (this.statusEl) this.statusEl.innerHTML = '<span class="lcars-loading"></span>';
 
     try {
       await this.api.post('/logs', {
         text,
-        category: this.categorySelect.value,
+        category: this.categorySelect?.value || 'personal',
       });
-      this.input.value = '';
-      this.statusEl.textContent = 'RECORDED';
-      this.statusEl.style.color = '#55CC55';
-      setTimeout(() => { this.statusEl.textContent = ''; }, 2000);
+      if (this.input) this.input.value = '';
+      if (this.statusEl) {
+        this.statusEl.textContent = 'RECORDED';
+        this.statusEl.style.color = '#55CC55';
+        setTimeout(() => { this.statusEl.textContent = ''; }, 2000);
+      }
     } catch (err) {
-      this.statusEl.textContent = 'ERROR';
-      this.statusEl.style.color = '#CC4444';
+      if (this.statusEl) {
+        this.statusEl.textContent = 'ERROR';
+        this.statusEl.style.color = '#CC4444';
+      }
     }
 
-    this.submitBtn.disabled = false;
-    this.submitBtn.textContent = 'Record Log';
+    if (this.submitBtn) {
+      this.submitBtn.disabled = false;
+      this.submitBtn.textContent = 'Record Log';
+    }
   }
 
   addEntry(data) {

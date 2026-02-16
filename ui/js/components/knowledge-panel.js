@@ -128,10 +128,22 @@ export class KnowledgePanel {
     this.container.querySelectorAll('.knowledge-delete-btn').forEach(btn => {
       btn.addEventListener('click', async (ev) => {
         ev.stopPropagation();
+        if (btn.disabled) return;
         const id = btn.dataset.id;
-        await this.api.delete(`/knowledge/${id}`);
-        this.entries = this.entries.filter(e => e.id !== id);
-        this.renderEntries();
+        const entry = this.entries.find(e => e.id === id);
+        const title = entry?.title || entry?.original_text?.slice(0, 40) || 'this entry';
+        if (!confirm('Delete "' + title + '"?')) return;
+        btn.disabled = true;
+        btn.textContent = 'Deleting...';
+        try {
+          await this.api.delete(`/knowledge/${id}`);
+          this.entries = this.entries.filter(e => e.id !== id);
+          this.renderEntries();
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = 'Delete';
+          console.error('Delete failed:', err);
+        }
       });
     });
   }

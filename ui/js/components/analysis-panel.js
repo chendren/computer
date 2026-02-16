@@ -26,7 +26,7 @@ export class AnalysisPanel {
     if (!text) return;
 
     this.submitBtn.disabled = true;
-    this.statusEl.textContent = 'Analyzing...';
+    this.statusEl.innerHTML = 'Analyzing<span class="lcars-loading"></span>';
 
     try {
       const title = text.length > 50 ? text.slice(0, 50) + '...' : text;

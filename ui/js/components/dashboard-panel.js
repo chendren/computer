@@ -44,13 +44,14 @@ export class DashboardPanel {
 
   async loadHistory() {
     try {
-      const [analyses, logs, monitors, knowledge, health, security] = await Promise.allSettled([
+      const [analyses, logs, monitors, knowledge, health, security, gmail] = await Promise.allSettled([
         this.api.get('/analyses'),
         this.api.get('/logs'),
         this.api.get('/monitors'),
         this.api.get('/knowledge'),
         this.api.get('/health'),
         this.api.get('/security/stats'),
+        this.api.get('/gmail/status'),
       ]);
       this.cachedData = {
         analyses: analyses.status === 'fulfilled' ? analyses.value : [],
@@ -59,7 +60,18 @@ export class DashboardPanel {
         knowledge: knowledge.status === 'fulfilled' ? knowledge.value : [],
         health: health.status === 'fulfilled' ? health.value : null,
         security: security.status === 'fulfilled' ? security.value : null,
+        gmail: gmail.status === 'fulfilled' ? gmail.value : null,
       };
+
+      // If Gmail connected, fetch inbox preview
+      if (this.cachedData.gmail?.connected) {
+        try {
+          const inbox = await this.api.get('/gmail/inbox?max=5');
+          this.cachedData.gmailInbox = inbox;
+        } catch {
+          this.cachedData.gmailInbox = null;
+        }
+      }
       this.render();
     } catch {}
   }
@@ -67,7 +79,7 @@ export class DashboardPanel {
   render() {
     if (!this.container) return;
     clearEmpty(this.container);
-    const d = this.cachedData || { analyses: [], logs: [], monitors: [], knowledge: [], health: null, security: null };
+    const d = this.cachedData || { analyses: [], logs: [], monitors: [], knowledge: [], health: null, security: null, gmail: null, gmailInbox: null };
 
     const activeMonitors = d.monitors.filter(m => m.status === 'active' || m.status === 'watching');
     const alertMonitors = d.monitors.filter(m => m.status === 'alert' || m.status === 'triggered');
@@ -171,7 +183,67 @@ export class DashboardPanel {
             </div>
           `).join('')}
         </div>
+
+        ${d.gmail?.connected ? `
+        <div class="dash-card dash-gmail" data-panel="channels">
+          <div class="dash-gmail-header">
+            <div class="dash-card-title">Communications</div>
+            ${d.gmailInbox?.messages ? (() => {
+              const unread = (d.gmailInbox.messages || []).filter(m => m.unread).length;
+              return unread > 0
+                ? `<div class="dash-gmail-badge">${unread} NEW</div>`
+                : `<div class="dash-gmail-badge" style="color:var(--lcars-green);background:rgba(68,204,68,0.1)">CLEAR</div>`;
+            })() : ''}
+          </div>
+          ${(() => {
+            const inbox = d.gmailInbox;
+            if (!inbox || !inbox.messages) return '<div class="dash-empty">Loading...</div>';
+            const msgs = inbox.messages || [];
+            const unread = msgs.filter(m => m.unread).length;
+            // Show only non-promotional unread, or top messages if all read
+            const important = msgs.filter(m => {
+              const labels = (m.labels || []).join(' ');
+              return !labels.includes('CATEGORY_PROMOTIONS') && !labels.includes('CATEGORY_SOCIAL');
+            });
+            const display = important.length > 0 ? important.slice(0, 4) : msgs.slice(0, 3);
+            return `
+              <div class="dash-stat-row">
+                <div class="dash-stat">
+                  <div class="dash-stat-value" style="color: ${unread > 0 ? 'var(--lcars-gold)' : 'var(--lcars-green)'}">${unread}</div>
+                  <div class="dash-stat-label">Unread</div>
+                </div>
+                <div class="dash-stat">
+                  <div class="dash-stat-value">${inbox.total || msgs.length}</div>
+                  <div class="dash-stat-label">Total</div>
+                </div>
+                <div class="dash-stat">
+                  <div class="dash-stat-value">${msgs.length - important.length}</div>
+                  <div class="dash-stat-label">Promos</div>
+                </div>
+              </div>
+              ${display.map(m => {
+                const from = (m.from || '').split('<')[0].trim() || 'unknown';
+                const subject = (m.subject || '(no subject)').slice(0, 45);
+                return `<div class="dash-gmail-msg">
+                  <span class="dash-gmail-from" style="color: ${m.unread ? 'var(--lcars-gold)' : 'var(--lcars-text-dim)'}">${escapeHtml(from.slice(0, 18))}</span>
+                  <span class="dash-gmail-subject">${escapeHtml(subject)}</span>
+                </div>`;
+              }).join('')}
+            `;
+          })()}
+        </div>
+        ` : ''}
       </div>
     `;
+
+    // Click handler for Gmail card → switch to channels panel
+    const gmailCard = this.container.querySelector('.dash-gmail[data-panel]');
+    if (gmailCard) {
+      gmailCard.style.cursor = 'pointer';
+      gmailCard.addEventListener('click', () => {
+        const btn = document.querySelector('.lcars-button[data-panel="channels"]');
+        if (btn) btn.click();
+      });
+    }
   }
 }

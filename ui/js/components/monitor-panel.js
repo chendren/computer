@@ -13,20 +13,26 @@ export class MonitorPanel {
     this.submitBtn = document.getElementById('monitor-submit-btn');
     this.statusEl = document.getElementById('monitor-status');
 
-    this.submitBtn.addEventListener('click', () => this.createMonitor());
-    this.targetInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') this.createMonitor();
-    });
+    if (this.submitBtn) {
+      this.submitBtn.addEventListener('click', () => this.createMonitor());
+    }
+    if (this.targetInput) {
+      this.targetInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') this.createMonitor();
+      });
+    }
   }
 
   async createMonitor() {
-    const name = this.nameInput.value.trim();
-    const target = this.targetInput.value.trim();
+    const name = this.nameInput?.value?.trim();
+    const target = this.targetInput?.value?.trim();
     if (!name || !target) return;
 
-    this.submitBtn.disabled = true;
-    this.submitBtn.textContent = 'Creating...';
-    this.statusEl.textContent = '';
+    if (this.submitBtn) {
+      this.submitBtn.disabled = true;
+      this.submitBtn.textContent = 'Creating...';
+    }
+    if (this.statusEl) this.statusEl.textContent = '';
 
     try {
       await this.api.post('/monitors', {
@@ -35,18 +41,24 @@ export class MonitorPanel {
         status: 'active',
         interval: '60s',
       });
-      this.nameInput.value = '';
-      this.targetInput.value = '';
-      this.statusEl.textContent = 'CREATED';
-      this.statusEl.style.color = '#55CC55';
-      setTimeout(() => { this.statusEl.textContent = ''; }, 2000);
+      if (this.nameInput) this.nameInput.value = '';
+      if (this.targetInput) this.targetInput.value = '';
+      if (this.statusEl) {
+        this.statusEl.textContent = 'CREATED';
+        this.statusEl.style.color = '#55CC55';
+        setTimeout(() => { this.statusEl.textContent = ''; }, 2000);
+      }
     } catch (err) {
-      this.statusEl.textContent = 'ERROR';
-      this.statusEl.style.color = '#CC4444';
+      if (this.statusEl) {
+        this.statusEl.textContent = 'ERROR';
+        this.statusEl.style.color = '#CC4444';
+      }
     }
 
-    this.submitBtn.disabled = false;
-    this.submitBtn.textContent = 'Create Monitor';
+    if (this.submitBtn) {
+      this.submitBtn.disabled = false;
+      this.submitBtn.textContent = 'Create Monitor';
+    }
   }
 
   display(data) {

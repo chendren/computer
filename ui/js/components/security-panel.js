@@ -39,12 +39,15 @@ export class SecurityPanel {
       <div class="lcars-divider"></div>
       <div class="lcars-label">Recent Redactions</div>
       <div class="security-log">
-        ${recent.length > 0 ? recent.slice(0, 20).map(r => `
-          <div class="security-log-item">
-            <span class="log-time">${new Date(r.timestamp).toLocaleTimeString()}</span>
+        ${recent.length > 0 ? recent.slice(0, 20).map(r => {
+          let timeStr = '';
+          try { timeStr = r.timestamp ? new Date(r.timestamp).toLocaleTimeString() : ''; } catch { timeStr = ''; }
+          return `<div class="security-log-item">
+            <span class="log-time">${timeStr}</span>
             <span class="log-pattern">${escapeHtml(r.pattern || r.type || 'secret')}</span>
             <span class="log-path">${escapeHtml(r.path || '')}</span>
-          </div>`).join('') : '<div class="empty-state"><div class="empty-state-text">No redactions recorded</div></div>'}
+          </div>`;
+        }).join('') : '<div class="empty-state"><div class="empty-state-text">No redactions recorded</div></div>'}
       </div>
     `;
   }
