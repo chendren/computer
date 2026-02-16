@@ -89,6 +89,11 @@
             <span id="upload-status" class="status-segment"></span>
           </div>
         </div>
+        <div class="transcript-session-controls">
+          <button class="cmd-btn cmd-btn-sm" id="transcript-save-btn">Save Session</button>
+          <button class="cmd-btn cmd-btn-sm" id="transcript-clear-btn">Clear</button>
+          <span id="transcript-save-status" class="status-segment"></span>
+        </div>
         <div class="lcars-divider"></div>
         <div class="lcars-label">Live Transcript</div>
         <div class="transcript-list" id="transcript-list">
@@ -100,6 +105,14 @@
 
       <!-- Analysis Panel -->
       <div id="panel-analysis" class="panel">
+        <div class="analysis-submit-form">
+          <textarea id="analysis-input" class="analysis-textarea" placeholder="Paste or type text to analyze..." rows="4"></textarea>
+          <div class="analysis-submit-row">
+            <button class="cmd-btn" id="analysis-submit-btn">Analyze</button>
+            <span id="analysis-status" class="status-segment"></span>
+          </div>
+        </div>
+        <div class="lcars-divider"></div>
         <div class="lcars-label">Analysis Results</div>
         <div id="analysis-results" style="flex:1; overflow-y:auto;">
           <div class="empty-state">
@@ -135,6 +148,20 @@
 
       <!-- Captain's Log Panel -->
       <div id="panel-log" class="panel">
+        <div class="log-submit-form">
+          <textarea id="log-input" class="analysis-textarea" placeholder="Captain's log, stardate..." rows="3"></textarea>
+          <div class="log-submit-row">
+            <select id="log-category" class="lcars-select">
+              <option value="personal">Personal</option>
+              <option value="mission">Mission</option>
+              <option value="technical">Technical</option>
+              <option value="observation">Observation</option>
+            </select>
+            <button class="cmd-btn" id="log-submit-btn">Record Log</button>
+            <span id="log-status" class="status-segment"></span>
+          </div>
+        </div>
+        <div class="lcars-divider"></div>
         <div class="lcars-label">Captain's Log</div>
         <div id="log-list" style="flex:1; overflow-y:auto;">
           <div class="empty-state">
@@ -145,6 +172,17 @@
 
       <!-- Monitor Panel -->
       <div id="panel-monitor" class="panel">
+        <div class="monitor-submit-form">
+          <div class="monitor-input-row">
+            <input type="text" id="monitor-name-input" class="search-input" placeholder="Monitor name..." autocomplete="off">
+            <input type="text" id="monitor-target-input" class="search-input" placeholder="URL or endpoint to monitor..." autocomplete="off">
+          </div>
+          <div class="monitor-submit-row">
+            <button class="cmd-btn" id="monitor-submit-btn">Create Monitor</button>
+            <span id="monitor-status" class="status-segment"></span>
+          </div>
+        </div>
+        <div class="lcars-divider"></div>
         <div class="lcars-label">Active Monitors</div>
         <div id="monitor-list" style="flex:1; overflow-y:auto;">
           <div class="empty-state">
@@ -155,6 +193,23 @@
 
       <!-- Comparison Panel -->
       <div id="panel-compare" class="panel">
+        <div class="comparison-submit-form">
+          <div class="comparison-inputs">
+            <div class="comparison-input-col">
+              <input type="text" id="compare-name-a" class="search-input" placeholder="Subject A name..." autocomplete="off">
+              <textarea id="compare-text-a" class="analysis-textarea" placeholder="Paste text A..." rows="4"></textarea>
+            </div>
+            <div class="comparison-input-col">
+              <input type="text" id="compare-name-b" class="search-input" placeholder="Subject B name..." autocomplete="off">
+              <textarea id="compare-text-b" class="analysis-textarea" placeholder="Paste text B..." rows="4"></textarea>
+            </div>
+          </div>
+          <div class="comparison-submit-row">
+            <button class="cmd-btn" id="compare-submit-btn">Compare</button>
+            <span id="compare-status" class="status-segment"></span>
+          </div>
+        </div>
+        <div class="lcars-divider"></div>
         <div class="lcars-label">Comparative Analysis</div>
         <div id="comparison-results" style="flex:1; overflow-y:auto;">
           <div class="empty-state">

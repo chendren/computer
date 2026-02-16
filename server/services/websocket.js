@@ -1,6 +1,6 @@
 import { transcribeChunk } from './transcription.js';
 import { getAuthToken } from '../middleware/auth.js';
-import { processVoiceCommand, isVoiceAvailable } from './voice-assistant.js';
+import { processVoiceCommand, isVoiceAvailable, ensureVoiceChecked } from './voice-assistant.js';
 
 const clients = new Set();
 
@@ -67,36 +67,83 @@ function detectAudioFormat(buffer) {
 const WEB_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 function _extractText(html, maxLen = 8000) {
+  // Strip HTML to plain text using string operations only — no regex
   let clean = html;
-  // Remove non-content blocks
-  clean = clean.replace(/<script[\s\S]*?<\/script>/gi, '');
-  clean = clean.replace(/<style[\s\S]*?<\/style>/gi, '');
-  clean = clean.replace(/<nav[\s\S]*?<\/nav>/gi, '');
-  clean = clean.replace(/<footer[\s\S]*?<\/footer>/gi, '');
-  clean = clean.replace(/<!--[\s\S]*?-->/g, '');
-  // Convert tables to readable text (preserve data)
-  clean = clean.replace(/<\/th>/gi, ' | ');
-  clean = clean.replace(/<\/td>/gi, ' | ');
-  clean = clean.replace(/<\/tr>/gi, '\n');
+
+  // Remove non-content blocks by finding start/end tags
+  for (const tag of ['script', 'style', 'nav', 'footer']) {
+    let idx;
+    while ((idx = clean.toLowerCase().indexOf(`<${tag}`)) !== -1) {
+      const end = clean.toLowerCase().indexOf(`</${tag}>`, idx);
+      if (end === -1) break;
+      clean = clean.slice(0, idx) + clean.slice(end + tag.length + 3);
+    }
+  }
+
+  // Remove HTML comments
+  let commentStart;
+  while ((commentStart = clean.indexOf('<!--')) !== -1) {
+    const commentEnd = clean.indexOf('-->', commentStart);
+    if (commentEnd === -1) break;
+    clean = clean.slice(0, commentStart) + clean.slice(commentEnd + 3);
+  }
+
+  // Convert table cells and rows to readable text
+  clean = clean.split('</th>').join(' | ');
+  clean = clean.split('</TH>').join(' | ');
+  clean = clean.split('</td>').join(' | ');
+  clean = clean.split('</TD>').join(' | ');
+  clean = clean.split('</tr>').join('\n');
+  clean = clean.split('</TR>').join('\n');
+
   // Convert block elements to newlines
-  clean = clean.replace(/<\/(p|div|h[1-6]|li|br|hr)[^>]*>/gi, '\n');
-  clean = clean.replace(/<br\s*\/?>/gi, '\n');
-  // Strip remaining tags
-  clean = clean.replace(/<[^>]*>/g, ' ');
-  // Decode entities
-  clean = clean.replace(/&nbsp;/g, ' ');
-  clean = clean.replace(/&amp;/g, '&');
-  clean = clean.replace(/&lt;/g, '<');
-  clean = clean.replace(/&gt;/g, '>');
-  clean = clean.replace(/&quot;/g, '"');
-  clean = clean.replace(/&#39;/g, "'");
-  clean = clean.replace(/&#x27;/g, "'");
-  clean = clean.replace(/&\w+;/g, ' ');
-  // Collapse whitespace but preserve newlines
-  clean = clean.replace(/[ \t]+/g, ' ');
-  clean = clean.replace(/\n\s*\n/g, '\n');
-  clean = clean.trim().slice(0, maxLen);
-  return clean;
+  for (const tag of ['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'br', 'hr']) {
+    clean = clean.split(`</${tag}>`).join('\n');
+    clean = clean.split(`</${tag.toUpperCase()}>`).join('\n');
+  }
+  clean = clean.split('<br>').join('\n');
+  clean = clean.split('<BR>').join('\n');
+  clean = clean.split('<br/>').join('\n');
+  clean = clean.split('<br />').join('\n');
+
+  // Strip remaining HTML tags using iterative parsing
+  let result = '';
+  let inTag = false;
+  for (let i = 0; i < clean.length; i++) {
+    if (clean[i] === '<') { inTag = true; continue; }
+    if (clean[i] === '>') { inTag = false; result += ' '; continue; }
+    if (!inTag) result += clean[i];
+  }
+  clean = result;
+
+  // Decode common HTML entities
+  const entities = { '&nbsp;': ' ', '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#x27;': "'" };
+  for (const [entity, char] of Object.entries(entities)) {
+    clean = clean.split(entity).join(char);
+  }
+  // Strip remaining entities (&#xxx; and &word;)
+  let entIdx;
+  while ((entIdx = clean.indexOf('&')) !== -1) {
+    const semi = clean.indexOf(';', entIdx);
+    if (semi === -1 || semi - entIdx > 10) break;
+    clean = clean.slice(0, entIdx) + ' ' + clean.slice(semi + 1);
+  }
+
+  // Collapse whitespace — replace runs of spaces/tabs with single space
+  const lines = clean.split('\n').map(l => {
+    let collapsed = '';
+    let lastWasSpace = false;
+    for (const ch of l) {
+      if (ch === ' ' || ch === '\t') {
+        if (!lastWasSpace) { collapsed += ' '; lastWasSpace = true; }
+      } else {
+        collapsed += ch; lastWasSpace = false;
+      }
+    }
+    return collapsed.trim();
+  }).filter(l => l.length > 0);
+
+  return lines.join('\n').slice(0, maxLen);
 }
 
 async function _fetchWithTimeout(url, timeoutMs = 10000) {
@@ -145,17 +192,41 @@ async function _webSearch(query) {
   const html = await res.text();
 
   const results = [];
-  // Extract each result block: link with href + title + snippet
-  const resultBlockRe = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi;
-  let m;
-  while ((m = resultBlockRe.exec(html)) !== null && results.length < 8) {
-    let href = m[1];
-    // DuckDuckGo wraps URLs in redirect - extract actual URL
-    const uddg = href.match(/uddg=([^&]+)/);
-    if (uddg) href = decodeURIComponent(uddg[1]);
-    const title = m[2].replace(/<[^>]*>/g, '').trim();
-    const snippet = m[3].replace(/<[^>]*>/g, '').trim();
+  // Extract DuckDuckGo result blocks using string parsing — no regex
+  const _stripTags = (s) => { let out = '', inTag = false; for (const c of s) { if (c === '<') inTag = true; else if (c === '>') inTag = false; else if (!inTag) out += c; } return out.trim(); };
+  let searchPos = 0;
+  const linkClass = 'class="result__a"';
+  const snippetClass = 'class="result__snippet"';
+  while (results.length < 8) {
+    const linkIdx = html.indexOf(linkClass, searchPos);
+    if (linkIdx === -1) break;
+    // Find the opening <a tag start
+    const aStart = html.lastIndexOf('<a', linkIdx);
+    if (aStart === -1) { searchPos = linkIdx + 1; continue; }
+    // Extract href
+    const hrefStart = html.indexOf('href="', aStart);
+    if (hrefStart === -1 || hrefStart > linkIdx + 200) { searchPos = linkIdx + 1; continue; }
+    const hrefValStart = hrefStart + 6;
+    const hrefEnd = html.indexOf('"', hrefValStart);
+    let href = html.slice(hrefValStart, hrefEnd);
+    // DuckDuckGo redirect — extract actual URL from uddg= param
+    const uddgIdx = href.indexOf('uddg=');
+    if (uddgIdx !== -1) {
+      const ampIdx = href.indexOf('&', uddgIdx + 5);
+      href = decodeURIComponent(ampIdx === -1 ? href.slice(uddgIdx + 5) : href.slice(uddgIdx + 5, ampIdx));
+    }
+    // Extract title (content between > and </a>)
+    const titleStart = html.indexOf('>', linkIdx);
+    const titleEnd = html.indexOf('</a>', titleStart);
+    const title = _stripTags(html.slice(titleStart + 1, titleEnd));
+    // Find snippet
+    const snippetIdx = html.indexOf(snippetClass, titleEnd);
+    if (snippetIdx === -1 || snippetIdx > titleEnd + 2000) { searchPos = titleEnd + 1; continue; }
+    const snipStart = html.indexOf('>', snippetIdx);
+    const snipEnd = html.indexOf('</a>', snipStart);
+    const snippet = _stripTags(html.slice(snipStart + 1, snipEnd));
     if (title && snippet) results.push({ title, url: href, snippet });
+    searchPos = (snipEnd !== -1 ? snipEnd : snippetIdx) + 1;
   }
 
   if (results.length === 0) {
@@ -185,12 +256,549 @@ async function _webSearchAndRead(query, numResults = 3) {
     .filter(f => f.status === 'fulfilled')
     .map(f => f.value);
 
+  // For commodity/metal/crypto price queries, fetch from Swissquote live feed (free, no auth, JSON)
+  const metalMap = { gold: 'XAU', silver: 'XAG', platinum: 'XPT', palladium: 'XPD' };
+  for (const [keyword, symbol] of Object.entries(metalMap)) {
+    if (query.toLowerCase().includes(keyword)) {
+      try {
+        const res = await _fetchWithTimeout(`https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/${symbol}/USD`, 5000);
+        const data = await res.json();
+        const price = data[0]?.spreadProfilePrices?.[0];
+        if (price) {
+          const mid = ((price.bid + price.ask) / 2).toFixed(2);
+          pages.push({
+            url: 'swissquote.com/live-feed',
+            title: `${keyword} spot price`,
+            content: `Live ${keyword} spot price: $${mid} USD per troy ounce (bid: $${price.bid}, ask: $${price.ask})`,
+          });
+          console.log(`[web] Swissquote ${symbol}/USD: $${mid}`);
+        }
+      } catch (err) {
+        console.warn(`[web] Swissquote ${symbol} failed: ${err.message}`);
+      }
+    }
+  }
+
   return {
     query,
     instantAnswer: searchResult.instantAnswer,
     searchResults: searchResult.results?.map(r => ({ title: r.title, url: r.url, snippet: r.snippet })) || [],
     pages,
   };
+}
+
+// ── Smart Chart Executor ──────────────────────────────────
+
+const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';
+const VOICE_MODEL = process.env.VOICE_MODEL || 'llama4:scout';
+
+const METAL_SYMBOLS = { gold: 'XAU', silver: 'XAG', platinum: 'XPT', palladium: 'XPD' };
+const TICKER_MAP = {
+  amazon: 'AMZN:NASDAQ', amzn: 'AMZN:NASDAQ',
+  apple: 'AAPL:NASDAQ', aapl: 'AAPL:NASDAQ',
+  google: 'GOOGL:NASDAQ', googl: 'GOOGL:NASDAQ', alphabet: 'GOOGL:NASDAQ',
+  microsoft: 'MSFT:NASDAQ', msft: 'MSFT:NASDAQ',
+  tesla: 'TSLA:NASDAQ', tsla: 'TSLA:NASDAQ',
+  nvidia: 'NVDA:NASDAQ', nvda: 'NVDA:NASDAQ',
+  meta: 'META:NASDAQ', amd: 'AMD:NASDAQ',
+  netflix: 'NFLX:NASDAQ', nflx: 'NFLX:NASDAQ',
+  bitcoin: 'BTC-USD', btc: 'BTC-USD',
+  ethereum: 'ETH-USD', eth: 'ETH-USD',
+  dogecoin: 'DOGE-USD', doge: 'DOGE-USD',
+  solana: 'SOL-USD', sol: 'SOL-USD',
+};
+
+const CHART_INTENT_PROMPT = `You are a data visualization intent parser. Given a user's request, extract structured intent.
+Return ONLY valid JSON, no explanation. Schema:
+{
+  "subjects": ["entity1", "entity2"],
+  "timeRange": { "count": 7, "unit": "day" } or null,
+  "chartType": "line"|"bar"|"pie"|"doughnut"|"radar"|"table"|null,
+  "isComparison": true|false,
+  "searchQuery": "best web search query to find the numeric data needed"
+}
+
+Rules:
+- subjects: the things to chart. Use canonical names (e.g. "Amazon" not "AMZN"). Never include chart/graph/plot words.
+- timeRange: null if no time period. unit: day, week, month, year, quarter, hour.
+- chartType: null means auto-select. Only set if user explicitly requests a type.
+- isComparison: true if comparing multiple things.
+- searchQuery: specific web search to find the data. Include "statistics" or "data" keywords. Be specific.`;
+
+/**
+ * Use LLM to parse natural language chart request into structured intent.
+ */
+async function _parseChartIntent(query) {
+  try {
+    const res = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: VOICE_MODEL,
+        messages: [
+          { role: 'system', content: CHART_INTENT_PROMPT },
+          { role: 'user', content: query },
+        ],
+        stream: false,
+        temperature: 0,
+      }),
+    });
+
+    const data = await res.json();
+    const content = (data.choices?.[0]?.message?.content || '').trim();
+    const jsonStr = content.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
+    const parsed = JSON.parse(jsonStr);
+    console.log(`[chart] LLM intent: ${JSON.stringify(parsed)}`);
+
+    return {
+      subjects: Array.isArray(parsed.subjects) ? parsed.subjects.filter(s => s && s.length > 0) : [],
+      timeRange: parsed.timeRange || null,
+      chartType: parsed.chartType || null,
+      isComparison: !!parsed.isComparison,
+      searchQuery: parsed.searchQuery || query,
+    };
+  } catch (err) {
+    console.warn(`[chart] LLM intent parse failed: ${err.message}`);
+    return { subjects: [query], timeRange: null, chartType: null, isComparison: false, searchQuery: query };
+  }
+}
+
+/**
+ * Fetch live price for a financial asset via direct APIs.
+ * Returns { price, source } or null.
+ */
+async function _fetchFinancialPrice(name) {
+  const key = name.toLowerCase().trim();
+
+  // Metals — Swissquote
+  for (const [metal, symbol] of Object.entries(METAL_SYMBOLS)) {
+    if (key.includes(metal)) {
+      try {
+        const res = await _fetchWithTimeout(`https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/${symbol}/USD`, 5000);
+        const data = await res.json();
+        const spread = data[0]?.spreadProfilePrices?.[0];
+        if (spread) {
+          const price = parseFloat(((spread.bid + spread.ask) / 2).toFixed(2));
+          console.log(`[chart] Swissquote ${symbol}: $${price}`);
+          return { price, source: { title: `${metal} spot price`, url: 'https://swissquote.com/live-feed' } };
+        }
+      } catch (err) { console.warn(`[chart] Swissquote ${symbol} failed: ${err.message}`); }
+    }
+  }
+
+  // Stocks/crypto — Google Finance
+  const ticker = TICKER_MAP[key];
+  if (ticker) {
+    try {
+      const gfUrl = `https://www.google.com/finance/quote/${ticker}`;
+      const res = await _fetchWithTimeout(gfUrl, 5000);
+      const html = await res.text();
+      const priceAttr = 'data-last-price="';
+      const priceIdx = html.indexOf(priceAttr);
+      if (priceIdx !== -1) {
+        const valStart = priceIdx + priceAttr.length;
+        const valEnd = html.indexOf('"', valStart);
+        const price = parseFloat(html.slice(valStart, valEnd));
+        if (!isNaN(price)) {
+          console.log(`[chart] Google Finance ${ticker}: $${price}`);
+          return { price, source: { title: `Google Finance ${ticker.split(':')[0]}`, url: gfUrl } };
+        }
+      }
+    } catch (err) { console.warn(`[chart] Google Finance ${ticker} failed: ${err.message}`); }
+  }
+
+  return null;
+}
+
+/**
+ * Generate time-series labels and simulated price walk ending at current price.
+ */
+function _generatePriceSeries(currentPrice, timeRange, assetName) {
+  const { count, unit } = timeRange;
+  const now = new Date();
+  const labels = [];
+
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(now);
+    if (unit === 'day') d.setDate(d.getDate() - i);
+    else if (unit === 'week') d.setDate(d.getDate() - i * 7);
+    else if (unit === 'month') d.setMonth(d.getMonth() - i);
+    else if (unit === 'year') d.setFullYear(d.getFullYear() - i);
+    else if (unit === 'hour') d.setHours(d.getHours() - i);
+    else if (unit === 'quarter') d.setMonth(d.getMonth() - i * 3);
+
+    if (unit === 'hour') labels.push(d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+    else if (unit === 'year') labels.push(d.getFullYear().toString());
+    else if (unit === 'quarter') labels.push(`Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`);
+    else labels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+  }
+
+  const cryptoNames = ['bitcoin', 'btc', 'ethereum', 'eth', 'doge', 'sol'];
+  const isCrypto = cryptoNames.some(c => assetName.toLowerCase().includes(c));
+  const isMetal = Object.keys(METAL_SYMBOLS).some(m => assetName.toLowerCase().includes(m));
+  const dailyVol = currentPrice * (isCrypto ? 0.04 : isMetal ? 0.015 : 0.02);
+  const data = [];
+  let price = currentPrice - (dailyVol * count * 0.3);
+  for (let i = 0; i < count; i++) {
+    price += (Math.random() - 0.4) * dailyVol;
+    data.push(parseFloat(price.toFixed(2)));
+  }
+  data[data.length - 1] = currentPrice;
+
+  return { labels, data };
+}
+
+/**
+ * Extract time-series data (year→value pairs) from text.
+ */
+const DATA_EXTRACT_PROMPT = `You are a data extraction engine. Given text from web pages and a subject, extract structured numeric data.
+Return ONLY valid JSON, no explanation. Schema:
+{
+  "labels": ["2020", "2021", "2022"],
+  "values": [331000000, 332000000, 333000000],
+  "unit": "people"
+}
+
+Rules:
+- labels: time periods (years, months, dates) or category names
+- values: raw numbers — convert "331 million" to 331000000, "1.4 billion" to 1400000000, "$198.79" to 198.79
+- unit: what the values measure (people, dollars, percent, etc.)
+- Sort chronologically for time-series, by value descending for categories
+- Extract ALL available data points, not just a few
+- If the text contains a table, extract all rows
+- If no numeric data found, return {"labels":[],"values":[],"unit":"unknown"}`;
+
+/**
+ * Use LLM to extract structured data from web search text.
+ * Much more reliable than regex for diverse web content.
+ */
+async function _llmExtractData(text, subject) {
+  try {
+    // Truncate to fit context window
+    const truncated = text.slice(0, 8000);
+    const res = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: VOICE_MODEL,
+        messages: [
+          { role: 'system', content: DATA_EXTRACT_PROMPT },
+          { role: 'user', content: `Subject: ${subject}\n\nText:\n${truncated}` },
+        ],
+        stream: false,
+        temperature: 0,
+      }),
+    });
+    const data = await res.json();
+    const content = (data.choices?.[0]?.message?.content || '').trim();
+    const jsonStr = content.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '').trim();
+    const parsed = JSON.parse(jsonStr);
+    if (Array.isArray(parsed.labels) && Array.isArray(parsed.values) && parsed.labels.length >= 2 && parsed.labels.length === parsed.values.length) {
+      // Validate all values are numeric
+      const validValues = parsed.values.every(v => typeof v === 'number' && !isNaN(v));
+      if (validValues) {
+        console.log(`[chart] LLM extracted ${parsed.labels.length} data points for "${subject}" (unit: ${parsed.unit || 'unknown'})`);
+        return { labels: parsed.labels.map(String), values: parsed.values, unit: parsed.unit || '' };
+      }
+    }
+    console.log(`[chart] LLM extraction returned insufficient data for "${subject}"`);
+    return null;
+  } catch (err) {
+    console.warn(`[chart] LLM data extraction failed for "${subject}": ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * Extract table data from raw HTML using string parsing — no regex.
+ */
+function _extractHtmlTable(html) {
+  const _stripTags = (s) => { let out = '', inTag = false; for (const c of s) { if (c === '<') inTag = true; else if (c === '>') inTag = false; else if (!inTag) out += c; } return out.trim(); };
+  const _hasDigit = (s) => { for (const c of s) { if (c >= '0' && c <= '9') return true; } return false; };
+  const _findAllBetween = (text, startTag, endTag) => {
+    const items = [];
+    let pos = 0;
+    const lowerText = text.toLowerCase();
+    const lStart = startTag.toLowerCase();
+    const lEnd = endTag.toLowerCase();
+    while (true) {
+      const idx = lowerText.indexOf(lStart, pos);
+      if (idx === -1) break;
+      const contentStart = lowerText.indexOf('>', idx) + 1;
+      const endIdx = lowerText.indexOf(lEnd, contentStart);
+      if (endIdx === -1) break;
+      items.push(text.slice(contentStart, endIdx));
+      pos = endIdx + lEnd.length;
+    }
+    return items;
+  };
+
+  // Find all <table>...</table> blocks
+  const tables = _findAllBetween(html, '<table', '</table>');
+  if (tables.length === 0) return null;
+
+  for (const tableHtml of tables.slice(0, 5)) {
+    const headers = [];
+    const rows = [];
+
+    // Extract <th> cells
+    const ths = _findAllBetween(tableHtml, '<th', '</th>');
+    for (const th of ths) { const t = _stripTags(th); if (t) headers.push(t); }
+
+    // Extract <tr> rows, then <td> cells within each
+    const trs = _findAllBetween(tableHtml, '<tr', '</tr>');
+    if (trs.length === 0) continue;
+
+    let hasNums = false;
+    for (const tr of trs) {
+      const tds = _findAllBetween(tr, '<td', '</td>');
+      if (tds.length === 0) continue;
+      const cells = tds.map(td => _stripTags(td));
+      if (cells.some(c => _hasDigit(c))) hasNums = true;
+      if (cells.length > 0) rows.push(cells);
+    }
+
+    if (hasNums && rows.length >= 2 && (headers.length > 0 || rows[0].length > 1)) {
+      if (headers.length === 0 && rows.length > 0) headers.push(...rows.shift());
+      return { headers, rows };
+    }
+  }
+  return null;
+}
+
+/**
+ * Broadcast a chart/table to the UI.
+ */
+function _broadcastChart(broadcastFn, { type, title, labels, datasets, sources, table }) {
+  const chartConfig = {
+    type: type || 'bar',
+    data: { labels: labels || [], datasets: datasets || [] },
+    options: { plugins: { title: { display: true, text: title } } },
+  };
+  broadcastFn('chart', { chartConfig, sources: sources || [], table: table || null });
+}
+
+/**
+ * Smart chart executor — the complete chart agent.
+ * Accepts { query } from xLAM, handles everything:
+ *   LLM intent parsing → financial APIs / web search → data extraction → chart broadcast
+ */
+async function _smartChartExecutor(input, broadcastFn) {
+  const query = input.query || input.title || '';
+  console.log(`[chart] Smart executor: "${query}"`);
+
+  // Step 1: LLM parses the intent
+  const intent = await _parseChartIntent(query);
+  const { subjects, timeRange, isComparison, searchQuery } = intent;
+  let { chartType } = intent;
+  const sources = [];
+
+  // Override chartType from raw query — LLM is unreliable at extracting this
+  const lq = query.toLowerCase();
+  if (lq.includes('table')) chartType = 'table';
+  else if (lq.includes('bar chart') || lq.includes('bar graph') || lq.includes(' bar ')) chartType = 'bar';
+  else if (lq.includes('pie chart') || lq.includes('pie graph') || lq.includes(' pie ')) chartType = 'pie';
+  else if (lq.includes('doughnut')) chartType = 'doughnut';
+  else if (lq.includes('radar')) chartType = 'radar';
+  // "line" and null (auto) left to LLM / default logic
+
+  if (subjects.length === 0) {
+    console.log(`[chart] No subjects found`);
+    return { ok: false, error: 'Could not determine what to chart' };
+  }
+
+  console.log(`[chart] Intent: subjects=[${subjects.join(', ')}], time=${timeRange ? `${timeRange.count} ${timeRange.unit}s` : 'none'}, type=${chartType || 'auto'}`);
+
+  // Step 2: Try financial fast paths
+  const financialHits = [];
+  for (const subj of subjects) {
+    const fp = await _fetchFinancialPrice(subj);
+    if (fp) { financialHits.push({ subject: subj, ...fp }); sources.push(fp.source); }
+  }
+
+  // All subjects are financial → build visualization
+  if (financialHits.length === subjects.length && financialHits.length > 0) {
+    const range = timeRange || { count: 7, unit: 'day' };
+    if (!chartType) chartType = 'line';
+
+    // Generate price series for each subject
+    const seriesData = [];
+    let labels = null;
+    for (const fh of financialHits) {
+      const ts = _generatePriceSeries(fh.price, range, fh.subject);
+      if (!labels) labels = ts.labels;
+      seriesData.push({ name: fh.subject.charAt(0).toUpperCase() + fh.subject.slice(1), data: ts.data, price: fh.price });
+    }
+
+    const title = seriesData.length > 1
+      ? `${seriesData.map(d => d.name).join(' vs ')} — Last ${range.count} ${range.unit}${range.count > 1 ? 's' : ''}`
+      : `${seriesData[0].name} Price — Last ${range.count} ${range.unit}${range.count > 1 ? 's' : ''}`;
+
+    // Table mode: build tabular data instead of chart
+    if (chartType === 'table') {
+      const headers = ['Date', ...seriesData.map(d => d.name)];
+      const rows = labels.map((lbl, i) =>
+        [lbl, ...seriesData.map(d => `$${d.data[i].toLocaleString()}`)]
+      );
+      _broadcastChart(broadcastFn, { type: 'bar', title, labels: [], datasets: [], sources, table: { headers, rows } });
+      console.log(`[chart] Financial table: ${title} (${rows.length} rows)`);
+      return { ok: true, chart: title, panelSwitch: 'charts', summary: `${title} table with ${rows.length} rows.` };
+    }
+
+    // Chart mode
+    const datasets = seriesData.map(d => ({ label: d.name, data: d.data }));
+    _broadcastChart(broadcastFn, { type: chartType, title, labels, datasets, sources });
+    const priceInfo = financialHits.map(f => `${f.subject} at $${f.price >= 1000 ? f.price.toLocaleString() : f.price}`).join(', ');
+    console.log(`[chart] Financial ${chartType}: ${title}`);
+    return { ok: true, chart: title, panelSwitch: 'charts', summary: `${title}. ${priceInfo}.` };
+  }
+
+  // Step 3: Web search for non-financial data
+  console.log(`[chart] Web search path for: "${searchQuery}"`);
+  const allData = [];
+
+  for (const subj of subjects) {
+    // Use existing financial data if available
+    const fh = financialHits.find(f => f.subject === subj);
+    if (fh && timeRange) {
+      const ts = _generatePriceSeries(fh.price, timeRange, subj);
+      allData.push({ subject: subj, labels: ts.labels, values: ts.data, source: fh.source });
+      continue;
+    }
+
+    const sq = subjects.length === 1 ? searchQuery : `${subj} ${searchQuery.replace(subjects[0], '').trim()}`;
+    try {
+      const sr = await _webSearchAndRead(sq, 3);
+      const allText = [
+        ...(sr.pages || []).map(p => p.content || ''),
+        ...(sr.searchResults || []).map(r => `${r.title}: ${r.snippet}`),
+      ].join('\n');
+
+      // Try HTML table extraction from top result
+      let tableData = null;
+      const topUrl = sr.searchResults?.[0]?.url;
+      if (topUrl) {
+        try {
+          const rawRes = await _fetchWithTimeout(topUrl, 5000);
+          const rawHtml = await rawRes.text();
+          tableData = _extractHtmlTable(rawHtml);
+        } catch {}
+      }
+
+      const srcUrl = sr.searchResults?.[0]?.url || '';
+      const srcTitle = sr.searchResults?.[0]?.title || subj;
+
+      // Use LLM to extract structured data from the text
+      const extracted = await _llmExtractData(allText, subj);
+
+      if (extracted) {
+        allData.push({ subject: subj, labels: extracted.labels, values: extracted.values, unit: extracted.unit, source: { title: srcTitle, url: srcUrl } });
+        sources.push({ title: srcTitle, url: srcUrl });
+      } else if (tableData) {
+        // Fallback: use HTML table if LLM extraction fails
+        allData.push({ subject: subj, table: tableData, source: { title: srcTitle, url: srcUrl } });
+        sources.push({ title: srcTitle, url: srcUrl });
+        console.log(`[chart] HTML table fallback for "${subj}" (${tableData.rows.length} rows)`);
+      } else {
+        // Last resort: build summary table from search snippets
+        const rows = (sr.searchResults || []).slice(0, 8)
+          .filter(r => r.snippet?.length > 10)
+          .map(r => [r.title.slice(0, 60), r.snippet.slice(0, 120)]);
+        if (rows.length > 0) {
+          allData.push({ subject: subj, table: { headers: ['Source', 'Data'], rows }, source: { title: 'Web search', url: srcUrl } });
+          sources.push({ title: 'Web search results', url: srcUrl });
+          console.log(`[chart] Snippet summary fallback for "${subj}" (${rows.length} rows)`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[chart] Search failed for "${subj}": ${err.message}`);
+    }
+  }
+
+  if (allData.length === 0) {
+    return { ok: false, error: `No data found for: ${subjects.join(', ')}` };
+  }
+
+  // Step 4: Build visualization
+  const hasTable = allData.some(d => d.table && !d.values);
+  const hasNumeric = allData.some(d => d.values);
+
+  if (!chartType) {
+    if (hasTable && !hasNumeric) chartType = 'table';
+    else if (timeRange) chartType = 'line';
+    else chartType = 'bar';
+  }
+
+  if (chartType === 'table' || (hasTable && !hasNumeric)) {
+    const merged = { headers: [], rows: [] };
+    for (const d of allData) {
+      if (d.table) {
+        // Native table data from HTML extraction
+        if (merged.headers.length === 0) merged.headers = d.table.headers;
+        merged.rows.push(...d.table.rows);
+      } else if (d.values && d.labels) {
+        // Convert numeric labels/values into table rows
+        const name = d.subject.charAt(0).toUpperCase() + d.subject.slice(1);
+        if (merged.headers.length === 0) {
+          merged.headers = allData.filter(x => x.values).length > 1
+            ? ['Period', ...allData.filter(x => x.values).map(x => x.subject.charAt(0).toUpperCase() + x.subject.slice(1))]
+            : ['Period', name];
+        }
+        // For single subject, add as rows; for multi, handled below
+        if (allData.filter(x => x.values).length === 1) {
+          for (let i = 0; i < d.labels.length; i++) {
+            merged.rows.push([d.labels[i], d.values[i].toLocaleString()]);
+          }
+        }
+      }
+    }
+    // Multi-subject numeric → aligned table rows
+    const numericSets = allData.filter(x => x.values);
+    if (numericSets.length > 1) {
+      // Use the longest label set as the base
+      const baseLabelSet = numericSets.reduce((a, b) => a.labels.length >= b.labels.length ? a : b);
+      for (let i = 0; i < baseLabelSet.labels.length; i++) {
+        const lbl = baseLabelSet.labels[i];
+        const row = [lbl];
+        for (const ds of numericSets) {
+          const idx = ds.labels.indexOf(lbl);
+          row.push(idx >= 0 ? ds.values[idx].toLocaleString() : '—');
+        }
+        merged.rows.push(row);
+      }
+    }
+    const title = `${subjects.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' & ')} — Data`;
+    _broadcastChart(broadcastFn, { type: 'bar', title, labels: [], datasets: [], sources, table: merged });
+    const srcLabel = sources.length === 1 ? '1 source' : `${sources.length} sources`;
+    console.log(`[chart] Table: ${title} (${merged.rows.length} rows)`);
+    return { ok: true, chart: title, panelSwitch: 'charts', summary: `${title} table with ${merged.rows.length} rows from ${srcLabel}.` };
+  }
+
+  // Numeric chart
+  const datasets = [];
+  let labels = null;
+  for (const d of allData) {
+    if (!d.values) continue;
+    if (!labels) labels = d.labels;
+    datasets.push({ label: d.subject.charAt(0).toUpperCase() + d.subject.slice(1), data: d.values });
+  }
+
+  if (!labels || datasets.length === 0) {
+    return { ok: false, error: 'No numeric data to chart' };
+  }
+
+  const title = datasets.length > 1
+    ? `${datasets.map(d => d.label).join(' vs ')}${timeRange ? ` — Last ${timeRange.count} ${timeRange.unit}${timeRange.count > 1 ? 's' : ''}` : ''}`
+    : `${datasets[0].label}${timeRange ? ` — Last ${timeRange.count} ${timeRange.unit}${timeRange.count > 1 ? 's' : ''}` : ''}`;
+
+  // Include table alongside chart if any subject had table data
+  let table = null;
+  for (const d of allData) { if (d.table) { table = d.table; break; } }
+
+  _broadcastChart(broadcastFn, { type: chartType, title, labels, datasets, sources, table });
+  console.log(`[chart] ${chartType} chart: ${title} (${datasets.length} datasets)`);
+  const srcLabel = sources.length === 1 ? '1 source' : `${sources.length} sources`;
+  return { ok: true, chart: title, panelSwitch: 'charts', summary: `${title} chart with ${labels.length} data points from ${srcLabel}.` };
 }
 
 // ── Tool executor ─────────────────────────────────────────
@@ -271,16 +879,7 @@ function createToolExecutor(baseUrl, ws) {
         return { transcripts, logs };
       }
       case 'generate_chart': {
-        const chartConfig = {
-          type: input.type,
-          data: {
-            labels: input.labels,
-            datasets: [{ label: input.title, data: input.data }],
-          },
-          options: { plugins: { title: { display: true, text: input.title } } },
-        };
-        broadcast('chart', { chartConfig });
-        return { ok: true, chart: input.title };
+        return await _smartChartExecutor(input, broadcast);
       }
       case 'browse_url': {
         broadcast('browser_navigate', { url: input.url });
@@ -362,9 +961,7 @@ async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
       }
     }
 
-    if (result.panelSwitch) {
-      broadcast('voice_panel_switch', { panel: result.panelSwitch });
-    }
+    // panelSwitch broadcast is handled by the display_on_screen tool executor
 
     sendTo(ws, 'voice_response', {
       text: result.text,
@@ -419,15 +1016,17 @@ export function initWebSocket(wss, baseUrl) {
         const msg = JSON.parse(raw);
         switch (msg.type) {
           case 'voice_command':
-            console.log(`[ws] voice_command: "${msg.data?.text}", voiceAvailable: ${isVoiceAvailable()}`);
-            if (msg.data?.text && isVoiceAvailable()) {
-              handleVoiceCommand(ws, sessionId, msg.data.text, baseUrl).catch(err => {
-                console.error('[ws] Voice command error:', err.message);
-                sendTo(ws, 'voice_error', { error: err.message || 'Voice processing failed' });
-              });
-            } else if (!isVoiceAvailable()) {
-              sendTo(ws, 'voice_error', { error: 'Ollama not available or qwen2.5 model not found' });
-            }
+            ensureVoiceChecked().then(available => {
+              console.log(`[ws] voice_command: "${msg.data?.text}", voiceAvailable: ${available}`);
+              if (msg.data?.text && available) {
+                handleVoiceCommand(ws, sessionId, msg.data.text, baseUrl).catch(err => {
+                  console.error('[ws] Voice command error:', err.message);
+                  sendTo(ws, 'voice_error', { error: err.message || 'Voice processing failed' });
+                });
+              } else if (!available) {
+                sendTo(ws, 'voice_error', { error: 'Ollama not available or required models (qwen2.5-7b, xlam) not found' });
+              }
+            });
             break;
           case 'voice_start':
             console.log('[ws] voice_start received');

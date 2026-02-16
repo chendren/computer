@@ -5,6 +5,43 @@ export class LogPanel {
   constructor(api) {
     this.api = api;
     this.container = document.getElementById('log-list');
+
+    // Submit form
+    this.input = document.getElementById('log-input');
+    this.categorySelect = document.getElementById('log-category');
+    this.submitBtn = document.getElementById('log-submit-btn');
+    this.statusEl = document.getElementById('log-status');
+
+    this.submitBtn.addEventListener('click', () => this.submitLog());
+    this.input.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') this.submitLog();
+    });
+  }
+
+  async submitLog() {
+    const text = this.input.value.trim();
+    if (!text) return;
+
+    this.submitBtn.disabled = true;
+    this.submitBtn.textContent = 'Recording...';
+    this.statusEl.textContent = '';
+
+    try {
+      await this.api.post('/logs', {
+        text,
+        category: this.categorySelect.value,
+      });
+      this.input.value = '';
+      this.statusEl.textContent = 'RECORDED';
+      this.statusEl.style.color = '#55CC55';
+      setTimeout(() => { this.statusEl.textContent = ''; }, 2000);
+    } catch (err) {
+      this.statusEl.textContent = 'ERROR';
+      this.statusEl.style.color = '#CC4444';
+    }
+
+    this.submitBtn.disabled = false;
+    this.submitBtn.textContent = 'Record Log';
   }
 
   addEntry(data) {
@@ -23,24 +60,48 @@ export class LogPanel {
     };
     const color = categoryColors[category] || '#FF9900';
 
-    let html = `<div class="log-header">`;
-    html += `<span class="log-stardate" style="color:${color}">Stardate ${escapeHtml(stardate)}</span>`;
-    html += `<span class="log-category" style="background:${color}">${escapeHtml(category)}</span>`;
+    const header = document.createElement('div');
+    header.className = 'log-header';
+
+    const sdSpan = document.createElement('span');
+    sdSpan.className = 'log-stardate';
+    sdSpan.style.color = color;
+    sdSpan.textContent = 'Stardate ' + stardate;
+    header.appendChild(sdSpan);
+
+    const catSpan = document.createElement('span');
+    catSpan.className = 'log-category';
+    catSpan.style.background = color;
+    catSpan.textContent = category;
+    header.appendChild(catSpan);
+
     if (data.timestamp) {
-      html += `<span class="log-timestamp">${formatDate(data.timestamp)} ${formatTime(data.timestamp)}</span>`;
+      const tsSpan = document.createElement('span');
+      tsSpan.className = 'log-timestamp';
+      tsSpan.textContent = formatDate(data.timestamp) + ' ' + formatTime(data.timestamp);
+      header.appendChild(tsSpan);
     }
-    html += `</div>`;
-    html += `<div class="log-text">${escapeHtml(data.text || '')}</div>`;
+
+    entry.appendChild(header);
+
+    const textDiv = document.createElement('div');
+    textDiv.className = 'log-text';
+    textDiv.textContent = data.text || '';
+    entry.appendChild(textDiv);
 
     if (data.tags && data.tags.length) {
-      html += `<div class="log-tags">`;
+      const tagsDiv = document.createElement('div');
+      tagsDiv.className = 'log-tags';
       data.tags.forEach((tag, i) => {
-        html += `<span class="topic-tag" style="background:${getLcarsColor(i)}">${escapeHtml(tag)}</span>`;
+        const tagSpan = document.createElement('span');
+        tagSpan.className = 'topic-tag';
+        tagSpan.style.background = getLcarsColor(i);
+        tagSpan.textContent = tag;
+        tagsDiv.appendChild(tagSpan);
       });
-      html += `</div>`;
+      entry.appendChild(tagsDiv);
     }
 
-    entry.innerHTML = html;
     this.container.insertBefore(entry, this.container.firstChild);
   }
 

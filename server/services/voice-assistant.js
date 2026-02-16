@@ -1,13 +1,16 @@
 /**
- * Voice Assistant Service
+ * Voice Assistant Service — Dual-Model Architecture
  *
- * Uses Qwen 2.5 7B via local Ollama with OpenAI-compatible tool use to process
- * voice commands. Maintains per-session conversation history and provides
- * an agentic tool loop for multi-step operations.
+ * Uses two local Ollama models:
+ * - xLAM 8B F16 (Salesforce Large Action Model): deterministic tool selection/routing
+ * - Llama 4 Scout (Meta MoE 16x17B): conversational response generation + analysis
+ *
+ * Flow: user input → xLAM picks tools → execute tools → Scout generates response
  */
 
 const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';
-const VOICE_MODEL = process.env.VOICE_MODEL || 'qwen2.5:7b-instruct-q4_K_M';
+const VOICE_MODEL = process.env.VOICE_MODEL || 'llama4:scout';
+const ACTION_MODEL = process.env.ACTION_MODEL || 'hf.co/Salesforce/Llama-xLAM-2-8b-fc-r-gguf:F16';
 
 // Per-session conversation history
 const sessions = new Map();
@@ -28,23 +31,19 @@ Use this date as the anchor for ALL time-relative requests. When the user says "
 Guidelines:
 - Respond concisely — your responses will be spoken aloud via TTS. Keep responses under 200 characters when possible. Never use markdown formatting, lists, or special characters in your response — it will be read aloud.
 - Be direct and authoritative, like the Star Trek computer. Use short declarative sentences.
-- Use tools when the user's request maps to a ship system. Do not describe what you would do — actually do it.
-- When the user says "on screen" or "show me", use the display_on_screen tool to switch the LCARS panel.
-- For multi-step tasks, chain tool calls as needed. For data visualization, first use web_fetch to get real data, then use generate_chart with that data.
 - If no tool is needed, respond with a brief spoken answer.
 - Never output API keys, tokens, passwords, or sensitive data.
-
-Web data retrieval:
-- For ANY question requiring current/real-time data (prices, weather, news, scores, stock quotes), you MUST use web_search_and_read. This tool searches AND reads the top pages automatically, giving you actual content with real numbers.
-- NEVER answer with prices, statistics, or current data from memory. ALWAYS use web_search_and_read first. Your training data is outdated.
-- Only report numbers that appear verbatim in the tool results. Quote the exact figures from the page content.
-- For charts: use web_search_and_read to get real data points, then generate_chart with the actual numbers from the results.
-- If the first search doesn't return clear numbers, try a more specific query or use web_fetch on a different URL.
-- NEVER fabricate, estimate, or round data. If you cannot find the exact number in the tool results, say "I could not find that data" — do not guess.
+- Only report numbers that appear verbatim in tool results. NEVER fabricate, estimate, or round data.
 - Do not apologize about technical limitations. Just try alternative approaches silently.`;
 }
 
-// OpenAI-compatible tool definitions for Ollama
+function getActionSystemPrompt() {
+  return `You are a tool-routing agent. Given the user's request, determine which tools to call. Only select tools when the request clearly maps to a tool's purpose. For general conversation or questions that don't need tools, return an empty array.
+
+IMPORTANT: Any request involving charts, graphs, plots, tables, visualizations, comparisons of data, stock prices, trends, statistics, or "show me data" MUST use the generate_chart tool. Pass the user's full request as the query parameter.`;
+}
+
+// OpenAI-compatible tool definitions
 const TOOLS = [
   {
     type: 'function',
@@ -80,7 +79,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'create_log',
-      description: "Create a captain's log entry.",
+      description: "Create a log entry. Use when user says 'log', 'captains log', 'captain\\'s log', 'log entry', 'record', or 'make a note'.",
       parameters: {
         type: 'object',
         properties: {
@@ -94,7 +93,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'display_on_screen',
-      description: 'Switch the main LCARS viewscreen to a specific panel. Use when user says "on screen" or "show me".',
+      description: 'Switch the viewscreen to a panel. Use when user says "on screen", "show me", "display", "open", "switch to", or "pull up".',
       parameters: {
         type: 'object',
         properties: {
@@ -185,16 +184,13 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'generate_chart',
-      description: 'Generate and display a chart on the viewscreen.',
+      description: 'Display a chart, graph, plot, table, or any data visualization on screen. MUST be used when user says chart, graph, plot, table, visualize, compare, trend, show data, show prices, display statistics, or any request to see data visually. Also use for stock prices, population, revenue, rankings, or any numeric data display. Pass the full user request as query.',
       parameters: {
         type: 'object',
         properties: {
-          type: { type: 'string', enum: ['bar', 'line', 'pie', 'doughnut', 'radar'] },
-          title: { type: 'string', description: 'Chart title' },
-          labels: { type: 'array', items: { type: 'string' } },
-          data: { type: 'array', items: { type: 'number' } },
+          query: { type: 'string', description: 'The user\'s full visualization request in natural language' },
         },
-        required: ['type', 'title', 'labels', 'data'],
+        required: ['query'],
       },
     },
   },
@@ -231,11 +227,11 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'web_search',
-      description: 'Search the web using DuckDuckGo. Returns search result titles and snippets. Use this FIRST when you need current data like prices, news, weather, or any real-time information. Then use web_fetch on promising result URLs if needed.',
+      description: 'Search the web using DuckDuckGo. Returns search result titles and snippets.',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'Search query — be specific, include dates when relevant' },
+          query: { type: 'string', description: 'Search query' },
         },
         required: ['query'],
       },
@@ -245,7 +241,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'web_fetch',
-      description: 'Fetch content from a specific URL. Returns extracted text content. Use after web_search to get details from a specific page.',
+      description: 'Fetch content from a specific URL. Returns extracted text content.',
       parameters: {
         type: 'object',
         properties: {
@@ -259,11 +255,11 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'web_search_and_read',
-      description: 'PREFERRED over web_search. Searches the web AND automatically fetches and reads the top result pages. Returns search snippets plus full extracted text content from the top pages. Use this for any query needing real current data: prices, weather, news, sports scores, stock quotes. Returns actual page content, not just snippets.',
+      description: 'Search the web AND automatically fetch and read the top result pages. Use for any query needing real current data: prices, weather, news, sports scores, stock quotes.',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'Search query — be specific, include dates when relevant' },
+          query: { type: 'string', description: 'Search query' },
           num_results: { type: 'number', description: 'Number of pages to read (default 3, max 5)' },
         },
         required: ['query'],
@@ -274,15 +270,19 @@ const TOOLS = [
 
 const MAX_TOOL_LOOPS = 10;
 
+
+
 /**
- * Call Ollama's OpenAI-compatible chat completions endpoint.
+ * Call Salesforce xLAM action model for deterministic tool selection.
+ * Uses standard OpenAI tool_calls format — finish_reason: "tool_calls"
+ * with message.tool_calls array of {id, function: {name, arguments}}.
  */
-async function callOllama(messages, systemPrompt) {
+async function callActionModel(userText) {
   const body = {
-    model: VOICE_MODEL,
+    model: ACTION_MODEL,
     messages: [
-      { role: 'system', content: systemPrompt },
-      ...messages,
+      { role: 'system', content: getActionSystemPrompt() },
+      { role: 'user', content: userText },
     ],
     tools: TOOLS,
     stream: false,
@@ -296,14 +296,77 @@ async function callOllama(messages, systemPrompt) {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`Ollama API error ${res.status}: ${errText.slice(0, 200)}`);
+    throw new Error(`xLAM API error ${res.status}: ${errText.slice(0, 200)}`);
   }
 
-  return await res.json();
+  const data = await res.json();
+  const choice = data.choices?.[0];
+
+  // Format 1: Standard OpenAI tool_calls array (preferred)
+  if (choice?.message?.tool_calls?.length > 0) {
+    return choice.message.tool_calls.map(tc => ({
+      name: tc.function?.name,
+      arguments: tc.function?.arguments,
+    }));
+  }
+
+  // Format 2: xLAM sometimes returns tool calls as JSON in content field
+  // e.g. [{"name": "...", "parameters": {...}}] or {"tool_calls": [...]}
+  const content = (choice?.message?.content || '').trim();
+  if (content.startsWith('[') || content.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(content);
+      const calls = Array.isArray(parsed) ? parsed
+        : parsed.tool_calls ? parsed.tool_calls
+        : [];
+      if (calls.length > 0 && calls[0].name) {
+        return calls.map(c => ({
+          name: c.name,
+          arguments: c.arguments || c.parameters,
+        }));
+      }
+    } catch {}
+  }
+
+  return [];
 }
 
 /**
- * Process a voice command through Qwen 2.5 via Ollama with tool use.
+ * Call Llama 4 Scout for conversational response generation.
+ * No tools — just generates a natural language response given context.
+ */
+async function callResponseModel(messages, systemPrompt) {
+  const body = {
+    model: VOICE_MODEL,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      ...messages,
+    ],
+    stream: false,
+    max_tokens: 200,
+  };
+
+  const res = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Ollama API error ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+/**
+ * Process a voice command using dual-model architecture.
+ *
+ * 1. xLAM determines which tools to call (deterministic routing)
+ * 2. Tools are executed server-side
+ * 3. qwen2.5-7b generates a conversational response from the results
  *
  * @param {string} sessionId - Unique session identifier
  * @param {string} userText - Transcribed voice command (wake word stripped)
@@ -312,48 +375,224 @@ async function callOllama(messages, systemPrompt) {
  */
 export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   const session = getOrCreateSession(sessionId);
+  const toolsUsed = [];
+  let panelSwitch = null;
+  const toolResults = [];
 
-  // Auto-search: detect queries needing current data and pre-fetch results
-  // so the model can't skip the search and hallucinate
+  // Auto-search: detect queries needing current data and pre-fetch
+  const searchKeywords = ['price', 'cost', 'worth', 'stock', 'quote', 'weather', 'forecast',
+    'temperature', 'score', 'result', 'news', 'latest', 'current', 'today', 'right now',
+    'how much is', 'spot price', 'market', 'exchange rate', 'rate of', 'bitcoin', 'btc',
+    'eth', 'gold', 'silver', 'platinum', 'oil', 'nasdaq', 'dow', 's&p', 'crypto'];
   const lowerText = userText.toLowerCase();
-  const needsSearch = /\b(price|cost|worth|stock|quote|weather|forecast|temperature|score|result|news|latest|current|today|right now|how much|what is the|spot price|market|exchange rate|rate of|bitcoin|btc|eth|gold|silver|platinum|oil|nasdaq|dow|s&p|crypto)\b/i.test(userText);
+  const needsSearch = searchKeywords.some(kw => lowerText.includes(kw));
 
   let enrichedText = userText;
+  let directAnswer = null; // If set, skip nemotron and use this directly
   if (needsSearch) {
     console.log(`[voice-ai] Auto-search triggered for: "${userText}"`);
     try {
       const searchResult = await toolExecutor('web_search_and_read', { query: userText, num_results: 3 });
-      const searchContext = [];
 
-      if (searchResult.instantAnswer) {
-        searchContext.push(`Instant answer: ${searchResult.instantAnswer}`);
-      }
-      if (searchResult.searchResults?.length) {
-        searchContext.push('Search results:');
-        for (const r of searchResult.searchResults.slice(0, 5)) {
-          searchContext.push(`- ${r.title}: ${r.snippet}`);
+      // Check for structured price data (from Swissquote or similar APIs)
+      if (searchResult.pages?.length) {
+        for (const p of searchResult.pages) {
+          if (!p.content) continue;
+          const marker = 'Live ';
+          const suffix = ' spot price: $';
+          const idx1 = p.content.indexOf(marker);
+          if (idx1 === -1) continue;
+          const idx2 = p.content.indexOf(suffix, idx1);
+          if (idx2 === -1) continue;
+          const commodity = p.content.slice(idx1 + marker.length, idx2);
+          const afterDollar = p.content.slice(idx2 + suffix.length);
+          const endIdx = afterDollar.indexOf(' USD');
+          if (endIdx === -1) continue;
+          const price = afterDollar.slice(0, endIdx);
+          directAnswer = `The current spot price of ${commodity} is $${price} per troy ounce.`;
+          console.log(`[voice-ai] Direct answer from structured data: ${directAnswer}`);
+          break;
         }
       }
-      if (searchResult.pages?.length) {
-        searchContext.push('\nPage content:');
-        for (const p of searchResult.pages) {
-          if (p.content) {
-            searchContext.push(`[${p.title}] (${p.url}):\n${p.content.slice(0, 2000)}`);
+
+      if (!directAnswer) {
+        const keyFacts = [];
+        if (searchResult.instantAnswer) keyFacts.push(searchResult.instantAnswer);
+
+        const _hasNumericData = (text) => text.includes('$') || text.includes('%');
+
+        if (searchResult.pages?.length) {
+          for (const p of searchResult.pages) {
+            if (!p.content) continue;
+            const lines = p.content.split('\n').filter(l => _hasNumericData(l));
+            for (const line of lines.slice(0, 5)) {
+              const trimmed = line.trim().slice(0, 200);
+              if (trimmed.length > 5) keyFacts.push(trimmed);
+            }
+          }
+        }
+
+        if (searchResult.searchResults?.length) {
+          for (const r of searchResult.searchResults.slice(0, 3)) {
+            if (_hasNumericData(r.snippet)) {
+              keyFacts.push(`${r.title}: ${r.snippet}`);
+            }
+          }
+        }
+
+        if (keyFacts.length > 0) {
+          const factStr = keyFacts.slice(0, 10).join('\n');
+          enrichedText = `${userText}\n\nFACTS FROM WEB (use these exact numbers):\n${factStr}`;
+          console.log(`[voice-ai] Injected ${keyFacts.length} key facts (${factStr.length} chars)`);
+        } else {
+          const rawBits = [];
+          for (const p of (searchResult.pages || [])) {
+            if (p.content) rawBits.push(`[${p.url}]: ${p.content.slice(0, 500)}`);
+          }
+          if (rawBits.length > 0) {
+            enrichedText = `${userText}\n\nWEB DATA:\n${rawBits.join('\n').slice(0, 2000)}`;
+            console.log(`[voice-ai] Injected raw web data`);
           }
         }
       }
 
-      if (searchContext.length > 0) {
-        const contextStr = searchContext.join('\n');
-        enrichedText = `${userText}\n\n--- LIVE WEB DATA (use these numbers, do NOT make up your own) ---\n${contextStr}\n--- END WEB DATA ---\n\nAnswer using ONLY the data above. Quote exact numbers from the web data.`;
-        console.log(`[voice-ai] Injected ${contextStr.length} chars of web data`);
-      }
+      toolsUsed.push('web_search_and_read');
+      toolResults.push({ tool: 'web_search_and_read', result: directAnswer || 'Web data injected' });
     } catch (err) {
       console.warn(`[voice-ai] Auto-search failed: ${err.message}`);
     }
   }
 
-  session.messages.push({ role: 'user', content: enrichedText });
+  // If we have a direct answer from structured data, skip LLM entirely
+  // BUT NOT if the user wants a visualization — let xLAM route to generate_chart
+  const vizKeywords = ['chart', 'graph', 'plot', 'table', 'visualiz', 'trend', 'show me', 'show the', 'show data', 'display data', 'compare data', 'comparison', 'versus', ' vs '];
+  const wantsViz = vizKeywords.some(kw => lowerText.includes(kw));
+  if (directAnswer && !wantsViz) {
+    console.log(`[voice-ai] Using direct answer (bypassing LLM): "${directAnswer}"`);
+    session.messages.push({ role: 'user', content: userText });
+    session.messages.push({ role: 'assistant', content: directAnswer });
+    if (session.messages.length > MAX_HISTORY) session.messages = session.messages.slice(-MAX_HISTORY);
+    return { text: directAnswer, toolsUsed, panelSwitch };
+  }
+
+  // Step 1: Ask xLAM what tools to call (deterministic routing)
+  console.log(`[voice-ai] [xLAM] Routing: "${userText}"`);
+  let actionToolCalls = [];
+  try {
+    actionToolCalls = await callActionModel(userText);
+    console.log(`[voice-ai] [xLAM] Selected ${actionToolCalls.length} tool(s): ${actionToolCalls.map(t => t.name).join(', ') || 'none'}`);
+  } catch (err) {
+    console.warn(`[voice-ai] [xLAM] Routing failed, falling back to no tools: ${err.message}`);
+  }
+
+  // xLAM safety net: if it didn't route to generate_chart but user clearly wants visualization, force it
+  const hasChartCall = actionToolCalls.some(tc => tc.name === 'generate_chart');
+  if (!hasChartCall && wantsViz) {
+    console.log(`[voice-ai] [xLAM] Forcing generate_chart — user request contains visualization keyword`);
+    actionToolCalls.push({ name: 'generate_chart', arguments: { query: userText } });
+  }
+
+  // Step 2: Execute xLAM-selected tools
+  let loops = 0;
+  for (const toolCall of actionToolCalls) {
+    if (++loops > MAX_TOOL_LOOPS) {
+      console.warn('[voice-ai] Max tool loop iterations reached');
+      break;
+    }
+
+    const fnName = toolCall.name;
+    let fnArgs = {};
+    try {
+      fnArgs = typeof toolCall.arguments === 'string'
+        ? JSON.parse(toolCall.arguments)
+        : toolCall.arguments || {};
+    } catch {
+      fnArgs = {};
+    }
+
+    // generate_chart: always pass original user text as query — xLAM can't be trusted to do this
+    if (fnName === 'generate_chart') {
+      fnArgs = { query: userText };
+    }
+
+    // Skip web_search_and_read if auto-search already ran
+    if (fnName === 'web_search_and_read' && needsSearch && toolsUsed.includes('web_search_and_read')) {
+      console.log(`[voice-ai] Skipping duplicate web_search_and_read (auto-search already ran)`);
+      continue;
+    }
+
+    toolsUsed.push(fnName);
+    console.log(`[voice-ai] Tool call: ${fnName}(${JSON.stringify(fnArgs).slice(0, 200)})`);
+
+    try {
+      const result = await toolExecutor(fnName, fnArgs);
+      console.log(`[voice-ai] Tool result: ${JSON.stringify(result).slice(0, 200)}`);
+
+      if (fnName === 'display_on_screen') {
+        panelSwitch = fnArgs.panel;
+      } else if (fnName === 'generate_chart') {
+        panelSwitch = 'charts';
+      } else if (fnName === 'analyze_text') {
+        panelSwitch = 'analysis';
+      }
+
+      toolResults.push({ tool: fnName, args: fnArgs, result });
+    } catch (err) {
+      console.error(`[voice-ai] Tool error: ${fnName}: ${err.message}`);
+      toolResults.push({ tool: fnName, args: fnArgs, error: err.message });
+    }
+  }
+
+  // Step 3: Generate spoken response
+  // For generate_chart, bypass LLM — use the summary directly to avoid hallucinated numbers
+  const chartResult = toolResults.find(tr => tr.tool === 'generate_chart' && !tr.error);
+  if (chartResult && chartResult.result?.summary) {
+    const spokenText = `Displaying ${chartResult.result.summary}`;
+    console.log(`[voice-ai] [chart-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // For analyze_text, bypass LLM — use structured result summary to avoid hallucination
+  const analysisResult = toolResults.find(tr => tr.tool === 'analyze_text' && !tr.error);
+  if (analysisResult && analysisResult.result) {
+    const r = analysisResult.result;
+    let spokenText = 'Analysis complete.';
+    if (r.sentiment && r.sentiment.overall) {
+      spokenText += ' Sentiment is ' + r.sentiment.overall;
+      if (r.sentiment.confidence) {
+        spokenText += ' with ' + Math.round(r.sentiment.confidence * 100) + ' percent confidence';
+      }
+      spokenText += '.';
+    }
+    if (r.topics && r.topics.length) {
+      spokenText += ' Found ' + r.topics.length + ' topic' + (r.topics.length === 1 ? '' : 's') + '.';
+    }
+    if (r.actionItems && r.actionItems.length) {
+      spokenText += ' ' + r.actionItems.length + ' action item' + (r.actionItems.length === 1 ? '' : 's') + ' identified.';
+    }
+    console.log('[voice-ai] [analysis-shortcut] Spoken: "' + spokenText + '"');
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // For all other tools, ask qwen2.5-7b to generate the response
+  let responsePrompt = enrichedText;
+  if (toolResults.length > 0) {
+    const toolContext = toolResults.map(tr => {
+      if (tr.error) {
+        return `[${tr.tool}] Error: ${tr.error}`;
+      }
+      const resultStr = typeof tr.result === 'string' ? tr.result : JSON.stringify(tr.result);
+      return `[${tr.tool}] Result:\n${resultStr.slice(0, 5000)}`;
+    }).join('\n\n');
+
+    responsePrompt = `User request: ${userText}\n\nTool results:\n${toolContext}\n\nRespond to the user based on the tool results above. Be concise — this will be spoken aloud. Do not add action tags, sound effects, or markdown.`;
+  }
+
+  session.messages.push({ role: 'user', content: responsePrompt });
 
   // Trim history
   if (session.messages.length > MAX_HISTORY) {
@@ -361,73 +600,10 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   }
 
   const systemPrompt = getSystemPrompt();
-  console.log(`[voice-ai] Calling Ollama (${VOICE_MODEL}): "${userText}"`);
+  console.log(`[voice-ai] [nemotron] Generating response for: "${userText}"`);
 
-  let response = await callOllama(session.messages, systemPrompt);
-  let choice = response.choices?.[0];
-  console.log(`[voice-ai] Response finish_reason: ${choice?.finish_reason}`);
-
-  const toolsUsed = [];
-  let panelSwitch = null;
-  let loops = 0;
-
-  // Agentic loop — keep processing until no more tool_calls
-  while (choice?.finish_reason === 'tool_calls' || choice?.message?.tool_calls?.length > 0) {
-    if (++loops > MAX_TOOL_LOOPS) {
-      console.warn('[voice-ai] Max tool loop iterations reached');
-      break;
-    }
-
-    const assistantMsg = choice.message;
-    session.messages.push(assistantMsg);
-
-    const toolCalls = assistantMsg.tool_calls || [];
-
-    for (const toolCall of toolCalls) {
-      const fnName = toolCall.function?.name;
-      let fnArgs = {};
-      try {
-        fnArgs = typeof toolCall.function?.arguments === 'string'
-          ? JSON.parse(toolCall.function.arguments)
-          : toolCall.function?.arguments || {};
-      } catch {
-        fnArgs = {};
-      }
-
-      toolsUsed.push(fnName);
-      console.log(`[voice-ai] Tool call: ${fnName}(${JSON.stringify(fnArgs).slice(0, 200)})`);
-
-      try {
-        const result = await toolExecutor(fnName, fnArgs);
-        console.log(`[voice-ai] Tool result: ${JSON.stringify(result).slice(0, 200)}`);
-
-        if (fnName === 'display_on_screen') {
-          panelSwitch = fnArgs.panel;
-        }
-
-        session.messages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: JSON.stringify(result).slice(0, 10000),
-        });
-      } catch (err) {
-        console.error(`[voice-ai] Tool error: ${fnName}: ${err.message}`);
-        session.messages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: JSON.stringify({ error: err.message }),
-        });
-      }
-    }
-
-    response = await callOllama(session.messages, systemPrompt);
-    choice = response.choices?.[0];
-    console.log(`[voice-ai] Loop response finish_reason: ${choice?.finish_reason}`);
-  }
-
-  // Extract final text
-  const responseText = choice?.message?.content || '';
-  console.log(`[voice-ai] Final response: "${responseText.slice(0, 200)}", tools: [${toolsUsed.join(', ')}]`);
+  const responseText = await callResponseModel(session.messages, systemPrompt);
+  console.log(`[voice-ai] [nemotron] Response: "${responseText.slice(0, 200)}", tools: [${toolsUsed.join(', ')}]`);
 
   session.messages.push({ role: 'assistant', content: responseText });
 
@@ -435,17 +611,21 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
 }
 
 /**
- * Check if voice assistant is available (Ollama reachable).
+ * Check if voice assistant is available (Ollama reachable with required models).
  */
-let _ollamaChecked = false;
 let _ollamaAvailable = false;
+let _checkPromise = checkOllama(); // start immediately on import
 
 export function isVoiceAvailable() {
-  // Kick off async check on first call
-  if (!_ollamaChecked) {
-    _ollamaChecked = true;
-    checkOllama();
-  }
+  return _ollamaAvailable;
+}
+
+/**
+ * Async version — awaits the Ollama check before returning.
+ * Use this in handlers that need an accurate answer on cold start.
+ */
+export async function ensureVoiceChecked() {
+  await _checkPromise;
   return _ollamaAvailable;
 }
 
@@ -455,11 +635,16 @@ async function checkOllama() {
     if (res.ok) {
       const data = await res.json();
       const models = (data.models || []).map(m => m.name);
-      _ollamaAvailable = models.some(m => m.includes('qwen2.5'));
+      const hasVoice = models.some(m => m === VOICE_MODEL || m.startsWith(VOICE_MODEL));
+      const hasAction = models.some(m => m === ACTION_MODEL || m.startsWith(ACTION_MODEL));
+      _ollamaAvailable = hasVoice && hasAction;
       if (_ollamaAvailable) {
-        console.log(`[voice-ai] Ollama available with ${VOICE_MODEL}`);
+        console.log(`[voice-ai] Ollama available — voice: ${VOICE_MODEL}, action: ${ACTION_MODEL}`);
       } else {
-        console.warn(`[voice-ai] Ollama online but ${VOICE_MODEL} not found. Available: ${models.join(', ')}`);
+        const missing = [];
+        if (!hasVoice) missing.push(VOICE_MODEL);
+        if (!hasAction) missing.push(ACTION_MODEL);
+        console.warn(`[voice-ai] Ollama online but missing models: ${missing.join(', ')}. Available: ${models.join(', ')}`);
       }
     }
   } catch {
@@ -470,6 +655,24 @@ async function checkOllama() {
 
 // Re-check Ollama availability every 30 seconds
 setInterval(() => checkOllama(), 30000);
+
+// Keep models warm in VRAM — send keep_alive every 10 minutes
+async function keepModelsWarm() {
+  try {
+    await fetch(`${OLLAMA_BASE}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: VOICE_MODEL, keep_alive: '30m', prompt: '' }),
+    });
+    await fetch(`${OLLAMA_BASE}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: ACTION_MODEL, keep_alive: '30m', prompt: '' }),
+    });
+  } catch {}
+}
+keepModelsWarm();
+setInterval(keepModelsWarm, 10 * 60 * 1000);
 
 function getOrCreateSession(sessionId) {
   if (!sessions.has(sessionId)) {

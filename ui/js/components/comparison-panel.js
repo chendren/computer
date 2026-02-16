@@ -2,8 +2,51 @@ import { clearEmpty, getLcarsColor } from '../utils/lcars-helpers.js';
 import { formatTime, escapeHtml } from '../utils/formatters.js';
 
 export class ComparisonPanel {
-  constructor() {
+  constructor(api) {
+    this.api = api;
     this.container = document.getElementById('comparison-results');
+
+    // Submit form
+    this.nameA = document.getElementById('compare-name-a');
+    this.textA = document.getElementById('compare-text-a');
+    this.nameB = document.getElementById('compare-name-b');
+    this.textB = document.getElementById('compare-text-b');
+    this.submitBtn = document.getElementById('compare-submit-btn');
+    this.statusEl = document.getElementById('compare-status');
+
+    this.submitBtn.addEventListener('click', () => this.submitComparison());
+  }
+
+  async submitComparison() {
+    const textA = this.textA.value.trim();
+    const textB = this.textB.value.trim();
+    if (!textA || !textB) return;
+
+    this.submitBtn.disabled = true;
+    this.submitBtn.textContent = 'Comparing...';
+    this.statusEl.textContent = '';
+
+    try {
+      await this.api.post('/comparisons', {
+        textA,
+        textB,
+        nameA: this.nameA.value.trim() || 'Subject A',
+        nameB: this.nameB.value.trim() || 'Subject B',
+      });
+      this.textA.value = '';
+      this.textB.value = '';
+      this.nameA.value = '';
+      this.nameB.value = '';
+      this.statusEl.textContent = 'COMPLETE';
+      this.statusEl.style.color = '#55CC55';
+      setTimeout(() => { this.statusEl.textContent = ''; }, 2000);
+    } catch (err) {
+      this.statusEl.textContent = 'ERROR';
+      this.statusEl.style.color = '#CC4444';
+    }
+
+    this.submitBtn.disabled = false;
+    this.submitBtn.textContent = 'Compare';
   }
 
   display(data) {
@@ -12,94 +55,202 @@ export class ComparisonPanel {
     const card = document.createElement('div');
     card.className = 'comparison-card';
 
-    let html = '';
-
     // Timestamp
     if (data.timestamp) {
-      html += `<div class="lcars-label" style="font-size:10px; margin-bottom:12px;">${formatTime(data.timestamp)}</div>`;
+      const ts = document.createElement('div');
+      ts.className = 'lcars-label';
+      ts.style.cssText = 'font-size:10px; margin-bottom:12px;';
+      ts.textContent = formatTime(data.timestamp);
+      card.appendChild(ts);
     }
 
     // Verdict
     if (data.verdict) {
-      html += `<div class="comparison-verdict">${escapeHtml(data.verdict)}</div>`;
-      html += `<div class="lcars-divider"></div>`;
+      const verdict = document.createElement('div');
+      verdict.className = 'comparison-verdict';
+      verdict.textContent = data.verdict;
+      card.appendChild(verdict);
+
+      const divider = document.createElement('div');
+      divider.className = 'lcars-divider';
+      card.appendChild(divider);
     }
 
     // Subjects
     if (data.subjectA || data.subjectB) {
-      html += `<div class="comparison-subjects">`;
+      const subjects = document.createElement('div');
+      subjects.className = 'comparison-subjects';
+
       if (data.subjectA) {
-        html += `<div class="comparison-subject subject-a">`;
-        html += `<div class="comparison-subject-label">Subject A</div>`;
-        html += `<div class="comparison-subject-name">${escapeHtml(data.subjectA.name || 'A')}</div>`;
-        if (data.subjectA.summary) html += `<div class="comparison-subject-summary">${escapeHtml(data.subjectA.summary)}</div>`;
-        html += `</div>`;
+        const a = document.createElement('div');
+        a.className = 'comparison-subject subject-a';
+        const aLabel = document.createElement('div');
+        aLabel.className = 'comparison-subject-label';
+        aLabel.textContent = 'Subject A';
+        a.appendChild(aLabel);
+        const aName = document.createElement('div');
+        aName.className = 'comparison-subject-name';
+        aName.textContent = data.subjectA.name || 'A';
+        a.appendChild(aName);
+        if (data.subjectA.summary) {
+          const aSummary = document.createElement('div');
+          aSummary.className = 'comparison-subject-summary';
+          aSummary.textContent = data.subjectA.summary;
+          a.appendChild(aSummary);
+        }
+        subjects.appendChild(a);
       }
+
       if (data.subjectB) {
-        html += `<div class="comparison-subject subject-b">`;
-        html += `<div class="comparison-subject-label">Subject B</div>`;
-        html += `<div class="comparison-subject-name">${escapeHtml(data.subjectB.name || 'B')}</div>`;
-        if (data.subjectB.summary) html += `<div class="comparison-subject-summary">${escapeHtml(data.subjectB.summary)}</div>`;
-        html += `</div>`;
+        const b = document.createElement('div');
+        b.className = 'comparison-subject subject-b';
+        const bLabel = document.createElement('div');
+        bLabel.className = 'comparison-subject-label';
+        bLabel.textContent = 'Subject B';
+        b.appendChild(bLabel);
+        const bName = document.createElement('div');
+        bName.className = 'comparison-subject-name';
+        bName.textContent = data.subjectB.name || 'B';
+        b.appendChild(bName);
+        if (data.subjectB.summary) {
+          const bSummary = document.createElement('div');
+          bSummary.className = 'comparison-subject-summary';
+          bSummary.textContent = data.subjectB.summary;
+          b.appendChild(bSummary);
+        }
+        subjects.appendChild(b);
       }
-      html += `</div>`;
+
+      card.appendChild(subjects);
     }
 
     // Similarity score
     if (data.similarityScore != null) {
       const pct = Math.round(data.similarityScore * 100);
-      html += `<div class="lcars-divider"></div>`;
-      html += `<h3>Similarity: ${pct}%</h3>`;
-      html += `<div class="similarity-bar"><div class="similarity-fill" style="width:${pct}%"></div></div>`;
+      const divider = document.createElement('div');
+      divider.className = 'lcars-divider';
+      card.appendChild(divider);
+
+      const h3 = document.createElement('h3');
+      h3.textContent = 'Similarity: ' + pct + '%';
+      card.appendChild(h3);
+
+      const bar = document.createElement('div');
+      bar.className = 'similarity-bar';
+      const fill = document.createElement('div');
+      fill.className = 'similarity-fill';
+      fill.style.width = pct + '%';
+      bar.appendChild(fill);
+      card.appendChild(bar);
     }
 
     // Differences
     if (data.differences && data.differences.length) {
-      html += `<div class="lcars-divider"></div>`;
-      html += `<h3>Key Differences</h3>`;
-      html += `<div class="comparison-diffs">`;
-      data.differences.forEach((d, i) => {
+      const divider = document.createElement('div');
+      divider.className = 'lcars-divider';
+      card.appendChild(divider);
+
+      const h3 = document.createElement('h3');
+      h3.textContent = 'Key Differences';
+      card.appendChild(h3);
+
+      const diffs = document.createElement('div');
+      diffs.className = 'comparison-diffs';
+      data.differences.forEach(d => {
         const impactColors = { high: '#CC4444', medium: '#FFCC00', low: '#55CC55' };
         const impactColor = impactColors[d.impact] || '#996600';
-        html += `<div class="comparison-diff">`;
-        html += `<div class="diff-aspect"><span class="diff-impact" style="color:${impactColor}">[${escapeHtml(d.impact || '?')}]</span> ${escapeHtml(d.aspect)}</div>`;
-        html += `<div class="diff-sides">`;
-        html += `<div class="diff-side diff-a"><span class="diff-label">A:</span> ${escapeHtml(d.subjectA || '')}</div>`;
-        html += `<div class="diff-side diff-b"><span class="diff-label">B:</span> ${escapeHtml(d.subjectB || '')}</div>`;
-        html += `</div>`;
+
+        const diff = document.createElement('div');
+        diff.className = 'comparison-diff';
+
+        const aspect = document.createElement('div');
+        aspect.className = 'diff-aspect';
+        const impact = document.createElement('span');
+        impact.className = 'diff-impact';
+        impact.style.color = impactColor;
+        impact.textContent = '[' + (d.impact || '?') + ']';
+        aspect.appendChild(impact);
+        aspect.appendChild(document.createTextNode(' ' + (d.aspect || '')));
+        diff.appendChild(aspect);
+
+        const sides = document.createElement('div');
+        sides.className = 'diff-sides';
+        const sideA = document.createElement('div');
+        sideA.className = 'diff-side diff-a';
+        const labelA = document.createElement('span');
+        labelA.className = 'diff-label';
+        labelA.textContent = 'A: ';
+        sideA.appendChild(labelA);
+        sideA.appendChild(document.createTextNode(d.subjectA || ''));
+        sides.appendChild(sideA);
+
+        const sideB = document.createElement('div');
+        sideB.className = 'diff-side diff-b';
+        const labelB = document.createElement('span');
+        labelB.className = 'diff-label';
+        labelB.textContent = 'B: ';
+        sideB.appendChild(labelB);
+        sideB.appendChild(document.createTextNode(d.subjectB || ''));
+        sides.appendChild(sideB);
+        diff.appendChild(sides);
+
         if (d.winner && d.winner !== 'tie') {
-          html += `<div class="diff-winner">Winner: ${escapeHtml(d.winner)}</div>`;
+          const winner = document.createElement('div');
+          winner.className = 'diff-winner';
+          winner.textContent = 'Winner: ' + d.winner;
+          diff.appendChild(winner);
         }
-        html += `</div>`;
+
+        diffs.appendChild(diff);
       });
-      html += `</div>`;
+      card.appendChild(diffs);
     }
 
     // Similarities
     if (data.similarities && data.similarities.length) {
-      html += `<div class="lcars-divider"></div>`;
-      html += `<h3>Similarities</h3>`;
-      html += `<ul>`;
+      const divider = document.createElement('div');
+      divider.className = 'lcars-divider';
+      card.appendChild(divider);
+
+      const h3 = document.createElement('h3');
+      h3.textContent = 'Similarities';
+      card.appendChild(h3);
+
+      const ul = document.createElement('ul');
       data.similarities.forEach(s => {
-        html += `<li><strong>${escapeHtml(s.aspect)}</strong>: ${escapeHtml(s.detail)}</li>`;
+        const li = document.createElement('li');
+        const strong = document.createElement('strong');
+        strong.textContent = s.aspect;
+        li.appendChild(strong);
+        li.appendChild(document.createTextNode(': ' + s.detail));
+        ul.appendChild(li);
       });
-      html += `</ul>`;
+      card.appendChild(ul);
     }
 
     // Recommendation
     if (data.recommendation) {
-      html += `<div class="lcars-divider"></div>`;
-      html += `<h3>Recommendation</h3>`;
-      html += `<p class="comparison-recommendation">${escapeHtml(data.recommendation)}</p>`;
+      const divider = document.createElement('div');
+      divider.className = 'lcars-divider';
+      card.appendChild(divider);
+
+      const h3 = document.createElement('h3');
+      h3.textContent = 'Recommendation';
+      card.appendChild(h3);
+
+      const p = document.createElement('p');
+      p.className = 'comparison-recommendation';
+      p.textContent = data.recommendation;
+      card.appendChild(p);
     }
 
-    card.innerHTML = html;
     this.container.insertBefore(card, this.container.firstChild);
   }
 
   async loadHistory(api) {
+    const client = api || this.api;
     try {
-      const items = await api.get('/comparisons');
+      const items = await client.get('/comparisons');
       for (const item of items) {
         this.display(item);
       }

@@ -174,6 +174,85 @@
   font-size: 14px;
   color: var(--lcars-light-blue);
   line-height: 1.4;
+  flex: 1;
+}
+
+.transcript-session-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.cmd-btn-sm {
+  font-size: 11px;
+  padding: 6px 14px;
+  letter-spacing: 1px;
+}
+
+.transcript-entry {
+  position: relative;
+}
+
+.transcript-entry-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.transcript-entry-actions .analyze-btn {
+  font-family: var(--lcars-font);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--lcars-bg);
+  background: var(--lcars-lavender);
+  border: none;
+  border-radius: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+
+.transcript-entry-actions .analyze-btn:hover { filter: brightness(1.2); }
+.transcript-entry-actions .analyze-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Analysis Panel ── */
+.analysis-submit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.analysis-textarea {
+  background: #0d0d20;
+  border: 1px solid var(--lcars-orange);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  color: var(--lcars-text);
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+}
+
+.analysis-textarea:focus {
+  border-color: var(--lcars-gold);
+  box-shadow: 0 0 8px rgba(255, 153, 0, 0.3);
+}
+
+.analysis-textarea::placeholder {
+  color: var(--lcars-text-dim);
+}
+
+.analysis-submit-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 /* ── Analysis Panel ── */
@@ -302,11 +381,59 @@
   border-radius: 8px;
   padding: 16px;
   position: relative;
-  max-height: 400px;
 }
 
-.chart-container canvas {
-  max-height: 350px;
+.chart-sources {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #1a1a3a;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.chart-sources a {
+  color: var(--lcars-orange);
+  text-decoration: none;
+  margin-right: 12px;
+  opacity: 0.7;
+}
+
+.chart-sources a:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.chart-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-family: var(--lcars-font);
+  font-size: 13px;
+}
+
+.chart-table th {
+  background: #1a1a3a;
+  color: var(--lcars-orange);
+  text-align: left;
+  padding: 8px 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  border-bottom: 2px solid var(--lcars-orange);
+}
+
+.chart-table td {
+  padding: 6px 12px;
+  color: var(--lcars-text);
+  border-bottom: 1px solid #1a1a3a;
+}
+
+.chart-table tbody tr:nth-child(even) {
+  background: rgba(255, 153, 0, 0.03);
+}
+
+.chart-table tbody tr:hover {
+  background: rgba(255, 153, 0, 0.08);
 }
 
 /* ── Search Panel ── */
@@ -424,6 +551,80 @@
   25% { content: '.'; }
   50% { content: '..'; }
   75% { content: '...'; }
+}
+
+/* ── Captain's Log Form ── */
+.log-submit-form {
+  padding: 8px 0;
+}
+.log-submit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.lcars-select {
+  background: #0d0d20;
+  color: #FF9900;
+  border: 1px solid #FF9900;
+  padding: 6px 10px;
+  font-family: 'Antonio', 'Helvetica Neue', sans-serif;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.lcars-select:focus {
+  outline: none;
+  border-color: #FFCC99;
+}
+
+/* ── Monitor Form ── */
+.monitor-submit-form {
+  padding: 8px 0;
+}
+.monitor-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.monitor-input-row .search-input {
+  flex: 1;
+}
+.monitor-submit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Comparison Form ── */
+.comparison-submit-form {
+  padding: 8px 0;
+}
+.comparison-inputs {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.comparison-input-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.comparison-input-col .search-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.comparison-input-col .analysis-textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.comparison-submit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* ── Captain's Log Panel ── */

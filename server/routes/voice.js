@@ -4,12 +4,17 @@ import { isVoiceAvailable } from '../services/voice-assistant.js';
 const router = Router();
 
 router.get('/status', (req, res) => {
-  const model = process.env.VOICE_MODEL || 'qwen2.5:7b-instruct-q4_K_M';
+  const voiceModel = process.env.VOICE_MODEL || 'llama4:scout';
+  const actionModel = process.env.ACTION_MODEL || 'hf.co/Salesforce/Llama-xLAM-2-8b-fc-r-gguf:F16';
   res.json({
     available: isVoiceAvailable(),
-    model,
+    models: {
+      voice: voiceModel,
+      action: actionModel,
+    },
     provider: 'ollama',
-    features: ['tool_use', 'conversation_history', 'tts', 'panel_switching'],
+    architecture: 'dual-model',
+    features: ['deterministic_routing', 'tool_use', 'conversation_history', 'tts', 'panel_switching'],
   });
 });
 

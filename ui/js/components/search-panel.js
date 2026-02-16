@@ -21,26 +21,28 @@ export class SearchPanel {
     this.searchBtn.textContent = 'Searching...';
 
     try {
-      const systemPrompt = `You are a research assistant. Search the web for the query and return results as JSON: {"results": [{"title": "...", "url": "...", "snippet": "..."}], "summary": "brief synthesis"}`;
+      const systemPrompt = 'You are a research assistant. Search the web for the query and return results as JSON: {"results": [{"title": "...", "url": "...", "snippet": "..."}], "summary": "brief synthesis"}';
       let response = '';
       await this.api.queryClaudeStream(
-        `Search the web for: ${query}`,
+        'Search the web for: ' + query,
         systemPrompt,
         (chunk) => { response += chunk; }
       );
 
-      try {
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          this.displayResults(JSON.parse(jsonMatch[0]));
-        } else {
+      // Try to extract JSON from the response
+      const firstBrace = response.indexOf('{');
+      const lastBrace = response.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        try {
+          this.displayResults(JSON.parse(response.slice(firstBrace, lastBrace + 1)));
+        } catch {
           this.displayRaw(response);
         }
-      } catch {
+      } else {
         this.displayRaw(response);
       }
     } catch (err) {
-      this.displayRaw(`Search error: ${err.message}`);
+      this.displayRaw('Search error: ' + err.message);
     }
 
     this.searchBtn.disabled = false;
@@ -54,7 +56,7 @@ export class SearchPanel {
     if (data.query) {
       const header = document.createElement('div');
       header.className = 'lcars-label';
-      header.textContent = `Results for: ${data.query}`;
+      header.textContent = 'Results for: ' + data.query;
       this.results.appendChild(header);
     }
 
@@ -116,10 +118,60 @@ export class SearchPanel {
     this.results.innerHTML = '';
     const el = document.createElement('div');
     el.className = 'analysis-card';
-    // Linkify URLs in raw text
     const pre = document.createElement('pre');
     pre.style.cssText = 'color:var(--lcars-light-blue); font-size:13px; white-space:pre-wrap;';
-    pre.innerHTML = linkifyText(text);
+
+    // Linkify URLs using string scanning (no regex)
+    const parts = [];
+    let remaining = text;
+    while (remaining.length > 0) {
+      const httpIdx = remaining.indexOf('http://');
+      const httpsIdx = remaining.indexOf('https://');
+      let idx = -1;
+      if (httpIdx === -1 && httpsIdx === -1) {
+        break;
+      } else if (httpIdx === -1) {
+        idx = httpsIdx;
+      } else if (httpsIdx === -1) {
+        idx = httpIdx;
+      } else {
+        idx = Math.min(httpIdx, httpsIdx);
+      }
+
+      // Add text before URL
+      if (idx > 0) {
+        const textNode = document.createTextNode(remaining.slice(0, idx));
+        pre.appendChild(textNode);
+      }
+
+      // Find end of URL (whitespace or certain punctuation)
+      const urlStart = idx;
+      let urlEnd = remaining.length;
+      for (let i = idx; i < remaining.length; i++) {
+        const c = remaining[i];
+        if (c === ' ' || c === '\n' || c === '\t' || c === '"' || c === "'" || c === ')' || c === ']' || c === '>' || c === '<') {
+          urlEnd = i;
+          break;
+        }
+      }
+
+      const url = remaining.slice(urlStart, urlEnd);
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.style.color = 'var(--lcars-light-blue)';
+      a.textContent = url;
+      pre.appendChild(a);
+
+      remaining = remaining.slice(urlEnd);
+    }
+
+    // Add any remaining text
+    if (remaining.length > 0) {
+      pre.appendChild(document.createTextNode(remaining));
+    }
+
     el.appendChild(pre);
     this.results.appendChild(el);
   }
@@ -127,12 +179,4 @@ export class SearchPanel {
   display(data) {
     this.displayResults(data);
   }
-}
-
-function linkifyText(text) {
-  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return escaped.replace(
-    /(https?:\/\/[^\s<>"')\]]+)/g,
-    '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:var(--lcars-light-blue);">$1</a>'
-  );
 }

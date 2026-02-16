@@ -6,6 +6,47 @@ export class MonitorPanel {
     this.api = api;
     this.container = document.getElementById('monitor-list');
     this.monitors = new Map();
+
+    // Submit form
+    this.nameInput = document.getElementById('monitor-name-input');
+    this.targetInput = document.getElementById('monitor-target-input');
+    this.submitBtn = document.getElementById('monitor-submit-btn');
+    this.statusEl = document.getElementById('monitor-status');
+
+    this.submitBtn.addEventListener('click', () => this.createMonitor());
+    this.targetInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this.createMonitor();
+    });
+  }
+
+  async createMonitor() {
+    const name = this.nameInput.value.trim();
+    const target = this.targetInput.value.trim();
+    if (!name || !target) return;
+
+    this.submitBtn.disabled = true;
+    this.submitBtn.textContent = 'Creating...';
+    this.statusEl.textContent = '';
+
+    try {
+      await this.api.post('/monitors', {
+        name,
+        target: { type: target.startsWith('http') ? 'url' : 'endpoint', value: target },
+        status: 'active',
+        interval: '60s',
+      });
+      this.nameInput.value = '';
+      this.targetInput.value = '';
+      this.statusEl.textContent = 'CREATED';
+      this.statusEl.style.color = '#55CC55';
+      setTimeout(() => { this.statusEl.textContent = ''; }, 2000);
+    } catch (err) {
+      this.statusEl.textContent = 'ERROR';
+      this.statusEl.style.color = '#CC4444';
+    }
+
+    this.submitBtn.disabled = false;
+    this.submitBtn.textContent = 'Create Monitor';
   }
 
   display(data) {
@@ -13,7 +54,6 @@ export class MonitorPanel {
 
     const id = data.name || data.id;
 
-    // Update existing monitor card or create new
     let card = this.monitors.get(id);
     if (card) {
       card.remove();
@@ -36,50 +76,121 @@ export class MonitorPanel {
     const status = data.status || (data.lastCheck && data.lastCheck.status) || 'active';
     const statusColor = statusColors[status] || '#996600';
 
-    let html = `<div class="monitor-header">`;
-    html += `<span class="monitor-status-dot" style="background:${statusColor}"></span>`;
-    html += `<span class="monitor-name">${escapeHtml(data.name || id)}</span>`;
-    html += `<span class="monitor-type">${escapeHtml(data.target?.type || 'unknown')}</span>`;
-    html += `</div>`;
+    // Header
+    const header = document.createElement('div');
+    header.className = 'monitor-header';
 
-    html += `<div class="monitor-target">${escapeHtml(data.target?.value || '')}</div>`;
+    const dot = document.createElement('span');
+    dot.className = 'monitor-status-dot';
+    dot.style.background = statusColor;
+    header.appendChild(dot);
 
-    if (data.interval) {
-      html += `<div class="monitor-meta">Interval: ${escapeHtml(data.interval)}</div>`;
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'monitor-name';
+    nameSpan.textContent = data.name || id;
+    header.appendChild(nameSpan);
+
+    const typeSpan = document.createElement('span');
+    typeSpan.className = 'monitor-type';
+    typeSpan.textContent = data.target?.type || 'unknown';
+    header.appendChild(typeSpan);
+
+    card.appendChild(header);
+
+    // Target
+    if (data.target?.value) {
+      const targetDiv = document.createElement('div');
+      targetDiv.className = 'monitor-target';
+      targetDiv.textContent = data.target.value;
+      card.appendChild(targetDiv);
     }
 
+    // Interval
+    if (data.interval) {
+      const metaDiv = document.createElement('div');
+      metaDiv.className = 'monitor-meta';
+      metaDiv.textContent = 'Interval: ' + data.interval;
+      card.appendChild(metaDiv);
+    }
+
+    // Last check
     if (data.lastCheck) {
       const lc = data.lastCheck;
-      html += `<div class="monitor-last-check">`;
-      html += `<span class="monitor-check-status" style="color:${statusColors[lc.status] || '#996600'}">${escapeHtml(lc.status || 'unknown').toUpperCase()}</span>`;
-      if (lc.timestamp) html += ` <span class="monitor-check-time">${formatTime(lc.timestamp)}</span>`;
-      if (lc.detail) html += `<div class="monitor-check-detail">${escapeHtml(lc.detail)}</div>`;
-      html += `</div>`;
+      const lcDiv = document.createElement('div');
+      lcDiv.className = 'monitor-last-check';
+
+      const lcStatus = document.createElement('span');
+      lcStatus.className = 'monitor-check-status';
+      lcStatus.style.color = statusColors[lc.status] || '#996600';
+      lcStatus.textContent = (lc.status || 'unknown').toUpperCase();
+      lcDiv.appendChild(lcStatus);
+
+      if (lc.timestamp) {
+        const lcTime = document.createElement('span');
+        lcTime.className = 'monitor-check-time';
+        lcTime.textContent = ' ' + formatTime(lc.timestamp);
+        lcDiv.appendChild(lcTime);
+      }
+
+      if (lc.detail) {
+        const lcDetail = document.createElement('div');
+        lcDetail.className = 'monitor-check-detail';
+        lcDetail.textContent = lc.detail;
+        lcDiv.appendChild(lcDetail);
+      }
+
+      card.appendChild(lcDiv);
     }
 
+    // Conditions
     if (data.conditions && data.conditions.length) {
-      html += `<div class="monitor-conditions">`;
+      const condDiv = document.createElement('div');
+      condDiv.className = 'monitor-conditions';
       data.conditions.forEach(c => {
-        html += `<div class="monitor-condition">${escapeHtml(c.check)}: ${escapeHtml(c.threshold)}</div>`;
+        const cEl = document.createElement('div');
+        cEl.className = 'monitor-condition';
+        cEl.textContent = c.check + ': ' + c.threshold;
+        condDiv.appendChild(cEl);
       });
-      html += `</div>`;
+      card.appendChild(condDiv);
     }
 
+    // History
     if (data.history && data.history.length) {
-      html += `<div class="monitor-history-label">Recent Checks</div>`;
-      html += `<div class="monitor-history">`;
+      const label = document.createElement('div');
+      label.className = 'monitor-history-label';
+      label.textContent = 'Recent Checks';
+      card.appendChild(label);
+
+      const histDiv = document.createElement('div');
+      histDiv.className = 'monitor-history';
       data.history.slice(0, 10).forEach(h => {
         const hColor = statusColors[h.status] || '#996600';
-        html += `<div class="monitor-history-item">`;
-        html += `<span class="monitor-history-dot" style="background:${hColor}"></span>`;
-        if (h.timestamp) html += `<span class="monitor-history-time">${formatTime(h.timestamp)}</span>`;
-        html += `<span class="monitor-history-detail">${escapeHtml(h.detail || h.status)}</span>`;
-        html += `</div>`;
+        const item = document.createElement('div');
+        item.className = 'monitor-history-item';
+
+        const hDot = document.createElement('span');
+        hDot.className = 'monitor-history-dot';
+        hDot.style.background = hColor;
+        item.appendChild(hDot);
+
+        if (h.timestamp) {
+          const hTime = document.createElement('span');
+          hTime.className = 'monitor-history-time';
+          hTime.textContent = formatTime(h.timestamp);
+          item.appendChild(hTime);
+        }
+
+        const hDetail = document.createElement('span');
+        hDetail.className = 'monitor-history-detail';
+        hDetail.textContent = h.detail || h.status;
+        item.appendChild(hDetail);
+
+        histDiv.appendChild(item);
       });
-      html += `</div>`;
+      card.appendChild(histDiv);
     }
 
-    card.innerHTML = html;
     this.container.insertBefore(card, this.container.firstChild);
   }
 

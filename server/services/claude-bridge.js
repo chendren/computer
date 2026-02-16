@@ -5,7 +5,7 @@
  */
 
 const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';
-const CHAT_MODEL = process.env.VOICE_MODEL || 'qwen2.5:7b-instruct-q4_K_M';
+const CHAT_MODEL = process.env.VOICE_MODEL || 'llama4:scout';
 
 export function queryClaude(prompt, systemPrompt) {
   return queryOllama(prompt, systemPrompt);

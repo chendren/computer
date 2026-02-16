@@ -34,11 +34,11 @@ class ComputerApp {
     this.statusBar = new StatusBar('#status-bar', '#status-indicators', this.ws);
     this.transcript = new TranscriptPanel(this.api);
     this.charts = new ChartPanel();
-    this.analysis = new AnalysisPanel();
+    this.analysis = new AnalysisPanel(this.api);
     this.search = new SearchPanel(this.api);
     this.log = new LogPanel(this.api);
     this.monitor = new MonitorPanel(this.api);
-    this.comparison = new ComparisonPanel();
+    this.comparison = new ComparisonPanel(this.api);
     this.knowledge = new KnowledgePanel(this.api);
     this.command = new CommandInput(this.api, this.ws);
     this.command.audioPlayer = this.audio;
@@ -72,7 +72,7 @@ class ComputerApp {
     });
 
     this.ws.on('chart', (data) => {
-      this.charts.render(data.chartConfig || data);
+      this.charts.render(data);
       this.switchPanel('charts');
     });
 
