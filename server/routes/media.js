@@ -3,15 +3,21 @@ import multer from 'multer';
 import path from 'path';
 import os from 'os';
 import fs from 'fs/promises';
-import { isGatewayConnected, callGateway } from '../services/gateway-client.js';
+import { analyzeImage, extractVideoFrames } from '../services/vision.js';
+import { listModels } from '../services/models.js';
 import { broadcast } from '../services/websocket.js';
 
-const ALLOWED_MEDIA_TYPES = /^(image|video|audio)\//;
+function isAllowedMediaType(mimetype) {
+  return mimetype.startsWith('image/') ||
+         mimetype.startsWith('video/') ||
+         mimetype.startsWith('audio/');
+}
+
 const upload = multer({
   dest: path.join(os.tmpdir(), 'computer-media'),
   limits: { fileSize: 25 * 1024 * 1024 }, // 25MB
   fileFilter: (req, file, cb) => {
-    if (ALLOWED_MEDIA_TYPES.test(file.mimetype)) {
+    if (isAllowedMediaType(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error('Invalid file type. Only image, video, and audio files are accepted.'));
@@ -23,19 +29,19 @@ const router = Router();
 // List available media analysis providers
 router.get('/providers', async (req, res) => {
   const providers = ['local'];
-  if (isGatewayConnected()) {
-    try {
-      const result = await callGateway('models.list');
-      const visionModels = (Array.isArray(result) ? result : []).filter(
-        m => m.capabilities?.includes('vision') || m.id?.includes('vision') || m.id?.includes('4o')
-      );
-      if (visionModels.length > 0) providers.push('gateway');
-    } catch {}
-  }
+  try {
+    const models = await listModels();
+    const visionModels = models.filter(m =>
+      Array.isArray(m.capabilities) && m.capabilities.indexOf('vision') !== -1
+    );
+    if (visionModels.length > 0) {
+      providers.push('ollama');
+    }
+  } catch {}
   res.json({ providers });
 });
 
-// Analyze image via gateway vision model
+// Analyze image via Ollama vision model
 router.post('/analyze', upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file provided' });
@@ -45,69 +51,52 @@ router.post('/analyze', upload.single('file'), async (req, res) => {
   const analysisPrompt = prompt || 'Describe this image in detail.';
 
   try {
-    // Read file as base64
     const fileBuffer = await fs.readFile(req.file.path);
     const base64 = fileBuffer.toString('base64');
     const mimeType = req.file.mimetype || 'image/png';
 
-    if (!isGatewayConnected()) {
-      return res.status(503).json({ error: 'Gateway not connected — media analysis requires gateway' });
-    }
-
     broadcast('status', { message: 'Analyzing media...', processing: true });
 
-    const result = await callGateway('chat.send', {
-      message: analysisPrompt,
-      attachments: [{ type: mimeType, data: base64 }],
-    });
+    const result = await analyzeImage(base64, mimeType, analysisPrompt);
 
     broadcast('status', { message: 'Media analysis complete', processing: false });
     broadcast('analysis', {
       type: 'media_analysis',
-      title: `Media: ${req.file.originalname}`,
-      content: result?.text || result?.response || JSON.stringify(result),
+      title: 'Media: ' + req.file.originalname,
+      content: result.text,
       mimeType,
       timestamp: new Date().toISOString(),
     });
 
     res.json({
       ok: true,
-      analysis: result?.text || result?.response || result,
+      analysis: result.text,
       filename: req.file.originalname,
     });
   } catch (err) {
     broadcast('status', { message: 'Media analysis failed', processing: false });
-    res.status(500).json({ error: 'Media analysis failed' });
+    res.status(500).json({ error: 'Media analysis failed: ' + err.message });
   } finally {
-    // Cleanup uploaded file
     await fs.unlink(req.file.path).catch(() => {});
   }
 });
 
-// Extract frames from video (via gateway)
+// Extract frames from video
 router.post('/video/frames', upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No video file provided' });
   }
 
-  if (!isGatewayConnected()) {
-    await fs.unlink(req.file.path).catch(() => {});
-    return res.status(503).json({ error: 'Gateway not connected' });
-  }
-
   try {
     const fileBuffer = await fs.readFile(req.file.path);
-    const base64 = fileBuffer.toString('base64');
-
-    const result = await callGateway('media.extractFrames', {
-      data: base64,
-      mimeType: req.file.mimetype,
-      frameCount: parseInt(req.body.frameCount) || 5,
-    });
-
-    res.json({ ok: true, frames: result });
+    const frames = await extractVideoFrames(
+      fileBuffer,
+      req.file.mimetype,
+      parseInt(req.body.frameCount) || 5
+    );
+    res.json({ ok: true, frames });
   } catch (err) {
-    res.status(500).json({ error: 'Video frame extraction failed' });
+    res.status(500).json({ error: 'Video frame extraction failed: ' + err.message });
   } finally {
     await fs.unlink(req.file.path).catch(() => {});
   }

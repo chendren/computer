@@ -1,4 +1,5 @@
 node_modules/
+moshi-env/
 data/
 package-lock.json
 *.log

@@ -7,11 +7,24 @@ export class VadService {
     this.vad = null;
     this.running = false;
     this.paused = false;
+    this.mode = 'computer'; // 'computer' = VAD-gated, 'moshi' = continuous Opus streaming
 
     // Callbacks
     this.onSpeechStart = null;
     this.onSpeechEnd = null;
     this.onError = null;
+
+    // Moshi mode state
+    this._moshiStream = null;
+    this._moshiProcessor = null;
+    this._moshiCtx = null;
+    this._opusEncoder = null;
+    this.onMoshiAudioFrame = null; // callback: (Uint8Array opusFrame) => void
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+    console.log('[VAD] Mode set to:', mode);
   }
 
   async start() {
@@ -91,6 +104,9 @@ export class VadService {
 
   stop() {
     console.log('[VAD] Stopping');
+    if (this.mode === 'moshi') {
+      this._stopMoshiStream();
+    }
     if (this.vad) {
       this.vad.pause();
       this.vad.destroy();
@@ -110,6 +126,114 @@ export class VadService {
     console.log('[VAD] Resuming');
     this.paused = false;
     if (this.vad) this.vad.start();
+  }
+
+  // ── Moshi Mode: Continuous Opus Streaming ──────────────
+
+  /**
+   * Start continuous microphone capture at 24kHz with Opus encoding.
+   * Moshi expects Opus frames — we use WebCodecs AudioEncoder.
+   */
+  async startMoshiStream() {
+    if (this._moshiStream) return;
+
+    console.log('[VAD] Starting Moshi continuous stream...');
+
+    // Request microphone at 24kHz mono
+    this._moshiStream = await navigator.mediaDevices.getUserMedia({
+      audio: { sampleRate: 24000, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+    });
+
+    this._moshiCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+    const source = this._moshiCtx.createMediaStreamSource(this._moshiStream);
+
+    // Use WebCodecs AudioEncoder for Opus encoding if available
+    if (typeof AudioEncoder !== 'undefined') {
+      // Create a ScriptProcessor to capture raw PCM and feed to encoder
+      // We use 1920 samples per frame (80ms at 24kHz) to match Moshi's expectation
+      const bufferSize = 1920;
+      this._moshiProcessor = this._moshiCtx.createScriptProcessor(bufferSize, 1, 1);
+
+      this._opusEncoder = new AudioEncoder({
+        output: (chunk) => {
+          // Extract encoded Opus data
+          const data = new Uint8Array(chunk.byteLength);
+          chunk.copyTo(data);
+          if (this.onMoshiAudioFrame) {
+            this.onMoshiAudioFrame(data);
+          }
+        },
+        error: (err) => {
+          console.error('[VAD] Opus encoder error:', err);
+        },
+      });
+
+      this._opusEncoder.configure({
+        codec: 'opus',
+        sampleRate: 24000,
+        numberOfChannels: 1,
+        bitrate: 24000,
+      });
+
+      let timestamp = 0;
+      this._moshiProcessor.onaudioprocess = (e) => {
+        if (this.paused) return;
+        const input = e.inputBuffer.getChannelData(0);
+        // Convert Float32 to Int16 for the encoder
+        const int16 = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) {
+          const s = Math.max(-1, Math.min(1, input[i]));
+          int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+
+        const audioData = new AudioData({
+          format: 's16',
+          sampleRate: 24000,
+          numberOfFrames: int16.length,
+          numberOfChannels: 1,
+          timestamp: timestamp,
+          data: int16.buffer,
+        });
+        timestamp += (int16.length / 24000) * 1_000_000; // microseconds
+
+        try {
+          this._opusEncoder.encode(audioData);
+          audioData.close();
+        } catch {
+          audioData.close();
+        }
+      };
+
+      source.connect(this._moshiProcessor);
+      this._moshiProcessor.connect(this._moshiCtx.destination);
+      console.log('[VAD] Moshi Opus streaming active (WebCodecs)');
+    } else {
+      console.warn('[VAD] WebCodecs AudioEncoder not available — cannot stream to Moshi');
+      this._stopMoshiStream();
+      return;
+    }
+
+    this.running = true;
+  }
+
+  _stopMoshiStream() {
+    if (this._opusEncoder && this._opusEncoder.state !== 'closed') {
+      try { this._opusEncoder.close(); } catch {}
+    }
+    this._opusEncoder = null;
+    if (this._moshiProcessor) {
+      this._moshiProcessor.disconnect();
+      this._moshiProcessor = null;
+    }
+    if (this._moshiCtx && this._moshiCtx.state !== 'closed') {
+      this._moshiCtx.close().catch(() => {});
+    }
+    this._moshiCtx = null;
+    if (this._moshiStream) {
+      this._moshiStream.getTracks().forEach(t => t.stop());
+      this._moshiStream = null;
+    }
+    console.log('[VAD] Moshi stream stopped');
   }
 
   static float32ToWavBlob(float32Array, sampleRate = 16000) {

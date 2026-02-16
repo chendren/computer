@@ -8,7 +8,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { initStorage } from './services/storage.js';
 import { initVectorDB } from './services/vectordb.js';
-import { initWebSocket } from './services/websocket.js';
+import { initWebSocket, broadcast } from './services/websocket.js';
 import apiRoutes from './routes/api.js';
 import knowledgeRoutes from './routes/knowledge.js';
 import transcribeRoutes from './routes/transcribe.js';
@@ -19,26 +19,24 @@ import gatewayExtrasRoutes from './routes/gateway-extras.js';
 import voiceRoutes from './routes/voice.js';
 import { securityScan, responseScan, getSecurityStats } from './middleware/security.js';
 import { initAuth, getAuthToken, requireAuth } from './middleware/auth.js';
-import {
-  startGateway,
-  stopGateway,
-  getGatewayStatus,
-  isGatewayAvailable,
-} from './services/gateway-manager.js';
-import {
-  connectToGateway,
-  disconnectFromGateway,
-  callGateway,
-  getClientStatus,
-  isGatewayConnected,
-} from './services/gateway-client.js';
-import { initConfigBridge, getConfigSummary } from './services/config-bridge.js';
+
+// Local services — replace OpenClaw gateway
+import { initConfig, getConfigSummary } from './services/config.js';
+import { listModels } from './services/models.js';
+import { listSessions } from './services/sessions.js';
+import { initAgents } from './services/agents.js';
+import { initCron, listJobs } from './services/cron-scheduler.js';
+import { listNodes } from './services/node-local.js';
+import { listPlugins } from './services/plugins.js';
+import * as gmail from './services/gmail.js';
+import { startMoshi, stopMoshi, getMoshiStatus } from './services/moshi.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(__dirname, '..');
 const PORT = process.env.COMPUTER_PORT || 3141;
 
 const app = express();
+app.set('pluginRoot', PLUGIN_ROOT);
 
 // Security headers (CSP, X-Frame-Options, etc.)
 app.use(helmet({
@@ -101,23 +99,17 @@ await initStorage(PLUGIN_ROOT);
 await initVectorDB(PLUGIN_ROOT);
 await initAuth(PLUGIN_ROOT);
 
-// Initialize OpenClaw integration (non-fatal if unavailable)
-let gatewayEnabled = false;
-try {
-  await initConfigBridge();
+// Initialize local services
+await initConfig(PLUGIN_ROOT);
+await initAgents(PLUGIN_ROOT);
+await initCron(PLUGIN_ROOT, broadcast);
+console.log('[computer] Local services initialized');
 
-  if (isGatewayAvailable()) {
-    await startGateway();
-    // Give gateway a moment to bind its port, then connect
-    setTimeout(() => connectToGateway().catch(err => console.warn('[computer] Gateway connect failed:', err.message)), 3000);
-    gatewayEnabled = true;
-    console.log('[computer] OpenClaw gateway integration enabled');
-  } else {
-    console.log('[computer] OpenClaw gateway not available (dist not found)');
-  }
-} catch (err) {
-  console.warn('[computer] OpenClaw integration failed:', err.message);
-}
+// Start Moshi speech-to-speech sidecar (non-fatal)
+startMoshi(PLUGIN_ROOT).then(ok => {
+  if (ok) console.log('[computer] Moshi speech-to-speech ready');
+  else console.log('[computer] Moshi not available (will retry on demand)');
+}).catch(() => {});
 
 // Stricter rate limit for sensitive endpoints
 const sensitiveLimit = rateLimit({
@@ -139,8 +131,8 @@ app.use('/api/voice', voiceRoutes);
 
 app.get('/api/health', async (req, res) => {
   const { isOllamaAvailable } = await import('./services/embeddings.js');
-  const gwStatus = getGatewayStatus();
-  const clientStatus = getClientStatus();
+  let gmailStatus = { connected: false };
+  try { gmailStatus = await gmail.getStatus(); } catch {}
   const response = {
     status: 'online',
     system: 'USS Enterprise Computer',
@@ -149,13 +141,14 @@ app.get('/api/health', async (req, res) => {
     vectordb: 'online',
     ollama: await isOllamaAvailable() ? 'online' : 'offline',
     gateway: {
-      enabled: gatewayEnabled,
-      running: gwStatus.running,
-      connected: clientStatus.connected,
-      pid: gwStatus.pid,
-      port: gwStatus.port,
-      uptime: gwStatus.uptime,
+      enabled: true,
+      running: true,
+      connected: true,
+      mode: 'local',
     },
+    gmail: gmailStatus,
+    moshi: getMoshiStatus(),
+    config: getConfigSummary(),
   };
   // Provide auth token to same-origin UI (strict origin check)
   const origin = req.get('origin') || '';
@@ -169,117 +162,63 @@ app.get('/api/security/stats', (req, res) => {
   res.json(getSecurityStats());
 });
 
-// ── Gateway API Proxy ─────────────────────────────────────
-// These endpoints proxy RPC calls to the OpenClaw gateway.
+// ── Local Service Endpoints (same paths as old gateway) ──────────
 
 app.get('/api/gateway/status', (req, res) => {
   res.json({
-    process: getGatewayStatus(),
-    client: getClientStatus(),
+    process: { running: true, pid: process.pid, port: PORT, uptime: Math.floor(process.uptime() * 1000), mode: 'local' },
+    client: { connected: true },
     config: getConfigSummary(),
   });
 });
 
-app.post('/api/gateway/restart', async (req, res) => {
-  try {
-    const { restartGateway } = await import('./services/gateway-manager.js');
-    await restartGateway();
-    setTimeout(() => connectToGateway().catch(err => console.warn('[computer] Gateway connect failed:', err.message)), 3000);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: 'Gateway restart failed' });
-  }
-});
-
-// RPC method allowlist — only permit known safe methods
-const ALLOWED_RPC_PREFIXES = [
-  'channels.', 'sessions.', 'models.', 'agents.', 'hooks.', 'tools.',
-  'cron.', 'skills.', 'tts.', 'stt.', 'config.get', 'node.list',
-  'node.camera', 'node.screen', 'oauth.', 'health',
-];
-
-app.post('/api/gateway/rpc', sensitiveLimit, async (req, res) => {
-  const { method, params } = req.body;
-  if (!method) {
-    return res.status(400).json({ error: 'method is required' });
-  }
-  // Validate method against allowlist
-  const allowed = ALLOWED_RPC_PREFIXES.some(prefix =>
-    method === prefix || method.startsWith(prefix)
-  );
-  if (!allowed) {
-    return res.status(403).json({ error: `RPC method '${method}' is not permitted` });
-  }
-  if (!isGatewayConnected()) {
-    return res.status(503).json({ error: 'Gateway not connected' });
-  }
-  try {
-    const result = await callGateway(method, params || {});
-    res.json({ ok: true, payload: result });
-  } catch (err) {
-    res.status(502).json({ ok: false, error: 'Gateway RPC failed' });
-  }
-});
-
-// ── Convenience endpoints that wrap common gateway RPC calls ──
-
 app.get('/api/gateway/channels', async (req, res) => {
-  if (!isGatewayConnected()) {
-    return res.json({ channels: [], connected: false });
-  }
   try {
-    const result = await callGateway('channels.status');
-    res.json({ channels: result, connected: true });
-  } catch (err) {
-    res.json({ channels: [], connected: false, error: err.message });
+    let gmailStatus = { connected: false };
+    try { gmailStatus = await gmail.getStatus(); } catch {}
+    const channels = [];
+    if (gmailStatus.connected) {
+      channels.push({ id: 'gmail', name: 'Gmail', type: 'email', connected: true, email: gmailStatus.email });
+    }
+    res.json({ channels, connected: true });
+  } catch {
+    res.json({ channels: [], connected: true });
   }
 });
 
 app.get('/api/gateway/sessions', async (req, res) => {
-  if (!isGatewayConnected()) {
-    return res.json({ sessions: [], connected: false });
-  }
   try {
-    const result = await callGateway('sessions.list');
-    res.json({ sessions: result, connected: true });
+    const sessions = listSessions();
+    res.json({ sessions, connected: true });
   } catch (err) {
-    res.json({ sessions: [], connected: false, error: err.message });
+    res.json({ sessions: [], connected: true, error: err.message });
   }
 });
 
 app.get('/api/gateway/nodes', async (req, res) => {
-  if (!isGatewayConnected()) {
-    return res.json({ nodes: [], connected: false });
-  }
   try {
-    const result = await callGateway('node.list');
-    res.json({ nodes: result, connected: true });
+    const nodes = listNodes();
+    res.json({ nodes, connected: true });
   } catch (err) {
-    res.json({ nodes: [], connected: false, error: err.message });
+    res.json({ nodes: [], connected: true, error: err.message });
   }
 });
 
 app.get('/api/gateway/models', async (req, res) => {
-  if (!isGatewayConnected()) {
-    return res.json({ models: [], connected: false });
-  }
   try {
-    const result = await callGateway('models.list');
-    res.json({ models: result, connected: true });
+    const models = await listModels();
+    res.json({ models, connected: true });
   } catch (err) {
-    res.json({ models: [], connected: false, error: err.message });
+    res.json({ models: [], connected: true, error: err.message });
   }
 });
 
 app.get('/api/gateway/cron', async (req, res) => {
-  if (!isGatewayConnected()) {
-    return res.json({ jobs: [], connected: false });
-  }
   try {
-    const result = await callGateway('cron.list');
-    res.json({ jobs: result, connected: true });
+    const jobs = listJobs();
+    res.json({ jobs, connected: true });
   } catch (err) {
-    res.json({ jobs: [], connected: false, error: err.message });
+    res.json({ jobs: [], connected: true, error: err.message });
   }
 });
 
@@ -288,33 +227,31 @@ app.post('/api/gateway/send', sensitiveLimit, async (req, res) => {
   if (!channel || !target || !text) {
     return res.status(400).json({ error: 'channel, target, and text are required' });
   }
-  if (!isGatewayConnected()) {
-    return res.status(503).json({ error: 'Gateway not connected' });
-  }
-  try {
-    const payload = { channel, target, text };
-    if (subject) payload.subject = subject;
-    if (replyTo) payload.replyTo = replyTo;
-    if (threadId) payload.threadId = threadId;
-    if (Array.isArray(attachments) && attachments.length > 0) {
-      payload.attachments = attachments;
+
+  // Route to Gmail for email sends
+  if (channel === 'gmail' || channel === 'email') {
+    try {
+      const result = await gmail.sendMessage({
+        to: target,
+        subject: subject || '',
+        body: text,
+        inReplyTo: replyTo || threadId,
+      });
+      return res.json({ ok: true, result });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
     }
-    const result = await callGateway('send', payload);
-    res.json({ ok: true, result });
-  } catch (err) {
-    res.status(502).json({ ok: false, error: 'Message send failed' });
   }
+
+  res.status(400).json({ ok: false, error: 'Channel ' + channel + ' not available. Supported: gmail' });
 });
 
 app.get('/api/gateway/plugins', async (req, res) => {
-  if (!isGatewayConnected()) {
-    return res.json({ plugins: [], connected: false });
-  }
   try {
-    const result = await callGateway('skills.status');
-    res.json({ plugins: result, connected: true });
+    const plugins = listPlugins();
+    res.json({ plugins, connected: true });
   } catch (err) {
-    res.json({ plugins: [], connected: false, error: err.message });
+    res.json({ plugins: [], connected: true, error: err.message });
   }
 });
 
@@ -334,9 +271,7 @@ server.listen(PORT, () => {
   console.log(`  http://localhost:${PORT}`);
   console.log(`  Auth Token: ${token.slice(0, 8)}...`);
   console.log(`  Token file: data/.auth-token`);
-  if (gatewayEnabled) {
-    console.log(`  OpenClaw Gateway: ACTIVE`);
-  }
+  console.log(`  Mode: LOCAL (self-contained)`);
   console.log(`  ============================\n`);
 });
 
@@ -344,15 +279,11 @@ server.listen(PORT, () => {
 
 async function shutdown(signal) {
   console.log(`\n[computer] Received ${signal}, shutting down...`);
-
-  disconnectFromGateway();
-  await stopGateway();
-
+  stopMoshi();
   server.close(() => {
     console.log('[computer] Server closed');
     process.exit(0);
   });
-
   // Force exit after 10s
   setTimeout(() => process.exit(1), 10000);
 }

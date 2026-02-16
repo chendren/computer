@@ -12,7 +12,23 @@ export class WebSocketClient {
       this.emit('_connected');
     };
 
+    this.ws.binaryType = 'arraybuffer';
+
     this.ws.onmessage = (event) => {
+      // Binary messages: Moshi audio/text frames with 1-byte kind prefix
+      if (event.data instanceof ArrayBuffer) {
+        const buf = new Uint8Array(event.data);
+        if (buf.length < 1) return;
+        const kind = buf[0];
+        const payload = buf.slice(1);
+        if (kind === 0x01) {
+          this.emit('moshi_audio_frame', payload);
+        } else if (kind === 0x02) {
+          this.emit('moshi_text_frame', new TextDecoder().decode(payload));
+        }
+        return;
+      }
+      // JSON text messages
       try {
         const { type, data } = JSON.parse(event.data);
         this.emit(type, data);

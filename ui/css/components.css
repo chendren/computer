@@ -2823,6 +2823,49 @@
   50% { box-shadow: 0 0 20px rgba(85, 204, 85, 0.6); }
 }
 
+/* MOSHI_ACTIVE — cyan pulse (full-duplex) */
+.voice-toggle[data-state="moshi_active"] {
+  border-color: #33ccff;
+  color: #33ccff;
+  box-shadow: 0 0 12px rgba(51, 204, 255, 0.5);
+  animation: voicePulseCyan 2s ease-in-out infinite;
+}
+
+@keyframes voicePulseCyan {
+  0%, 100% { box-shadow: 0 0 8px rgba(51, 204, 255, 0.3); }
+  50% { box-shadow: 0 0 24px rgba(51, 204, 255, 0.7); }
+}
+
+/* Voice Mode Toggle Button */
+.voice-mode-toggle {
+  background: none;
+  border: 1px solid #444;
+  color: #888;
+  font-size: 10px;
+  font-family: inherit;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 6px;
+  transition: all 0.3s;
+}
+
+.voice-mode-toggle:hover {
+  border-color: var(--lcars-orange);
+  color: var(--lcars-orange);
+}
+
+.voice-mode-toggle[data-mode="moshi"] {
+  border-color: #33ccff;
+  color: #33ccff;
+}
+
+.voice-mode-toggle[data-mode="computer"] {
+  border-color: var(--lcars-orange);
+  color: var(--lcars-orange);
+}
+
 /* ══════════════════════════════════════════════
    Alert System
    ══════════════════════════════════════════════ */

@@ -1,8 +1,11 @@
 import { transcribeChunk } from './transcription.js';
 import { getAuthToken } from '../middleware/auth.js';
 import { processVoiceCommand, isVoiceAvailable, ensureVoiceChecked } from './voice-assistant.js';
+import { createMoshiBridge, isMoshiRunning, KIND_AUDIO } from './moshi.js';
 
 const clients = new Set();
+// Per-client state: { voiceMode: 'moshi'|'computer', moshiBridge, moshiTextBuffer }
+const clientState = new Map();
 
 // Limit concurrent Whisper chunk processes to 1
 let whisperBusy = false;
@@ -1149,6 +1152,112 @@ function sendTo(ws, type, data) {
   }
 }
 
+// ── Moshi Bridge Helpers ──────────────────────────────────
+
+const WAKE_WORDS = ['computer,', 'computer.', 'computer!', 'computer '];
+
+/**
+ * Check if text contains the wake word "Computer" to trigger mode switch.
+ */
+function detectWakeWord(text) {
+  const lower = text.toLowerCase().trim();
+  if (lower === 'computer') return { detected: true, command: '' };
+  for (const wake of WAKE_WORDS) {
+    const idx = lower.indexOf(wake);
+    if (idx !== -1) {
+      const command = text.slice(idx + wake.length).trim();
+      return { detected: true, command };
+    }
+  }
+  return { detected: false, command: '' };
+}
+
+/**
+ * Connect a client to Moshi via a WebSocket bridge.
+ */
+async function connectMoshiBridge(ws, state, baseUrl, sessionId) {
+  if (state.moshiBridge && state.moshiBridge.isOpen()) {
+    return true; // Already connected
+  }
+
+  const running = await isMoshiRunning();
+  if (!running) {
+    sendTo(ws, 'moshi_error', { error: 'Moshi is not running' });
+    return false;
+  }
+
+  const bridge = createMoshiBridge();
+
+  // Relay Moshi audio responses back to browser
+  bridge.onAudio((opusFrame) => {
+    if (ws.readyState === 1) {
+      // Send binary with 0x01 prefix so browser knows it's Opus audio from Moshi
+      const frame = Buffer.alloc(1 + opusFrame.length);
+      frame[0] = KIND_AUDIO;
+      opusFrame.copy(frame, 1);
+      ws.send(frame);
+    }
+  });
+
+  // Relay Moshi text tokens to browser + check for wake word
+  bridge.onText((text) => {
+    // Accumulate text tokens into a buffer for wake word detection
+    state.moshiTextBuffer += text;
+    sendTo(ws, 'moshi_text', { text, fullText: state.moshiTextBuffer });
+
+    // Check for wake word in accumulated text
+    const { detected, command } = detectWakeWord(state.moshiTextBuffer);
+    if (detected && command.length > 3) {
+      console.log('[ws] Wake word detected in Moshi text, switching to Computer mode: "' + command + '"');
+      state.moshiTextBuffer = '';
+      // Switch to computer mode temporarily
+      switchToComputerMode(ws, state, sessionId, command, baseUrl);
+    }
+  });
+
+  bridge.onHandshake((config) => {
+    sendTo(ws, 'moshi_handshake', config);
+  });
+
+  bridge.onClose(() => {
+    state.moshiBridge = null;
+    sendTo(ws, 'voice_mode_changed', { mode: 'computer', reason: 'moshi_disconnected' });
+  });
+
+  try {
+    await bridge.connect();
+    state.moshiBridge = bridge;
+    state.moshiTextBuffer = '';
+    console.log('[ws] Moshi bridge connected for client');
+    return true;
+  } catch (err) {
+    console.error('[ws] Moshi bridge connection failed: ' + err.message);
+    sendTo(ws, 'moshi_error', { error: 'Failed to connect to Moshi: ' + err.message });
+    return false;
+  }
+}
+
+/**
+ * Temporarily switch to Computer mode to process a tool command,
+ * then switch back to Moshi mode.
+ */
+async function switchToComputerMode(ws, state, sessionId, command, baseUrl) {
+  state.voiceMode = 'computer';
+  sendTo(ws, 'voice_mode_changed', { mode: 'computer', reason: 'wake_word', command });
+
+  try {
+    await handleVoiceCommand(ws, sessionId, command, baseUrl);
+  } catch (err) {
+    console.error('[ws] Computer mode command failed: ' + err.message);
+    sendTo(ws, 'voice_error', { error: err.message });
+  }
+
+  // Switch back to Moshi mode
+  state.voiceMode = 'moshi';
+  state.moshiTextBuffer = '';
+  sendTo(ws, 'voice_mode_changed', { mode: 'moshi', reason: 'command_complete' });
+}
+
 export function initWebSocket(wss, baseUrl) {
   wss.on('connection', (ws, req) => {
     // Authenticate WebSocket connections via query param
@@ -1163,15 +1272,43 @@ export function initWebSocket(wss, baseUrl) {
     // Assign a session ID for voice conversation history
     const sessionId = `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+    // Initialize per-client state
+    const state = { voiceMode: 'computer', moshiBridge: null, moshiTextBuffer: '' };
+    clientState.set(ws, state);
+
     clients.add(ws);
-    ws.on('close', () => clients.delete(ws));
-    ws.on('error', () => clients.delete(ws));
+    ws.on('close', () => {
+      clients.delete(ws);
+      // Clean up Moshi bridge
+      const s = clientState.get(ws);
+      if (s?.moshiBridge) { s.moshiBridge.close(); }
+      clientState.delete(ws);
+    });
+    ws.on('error', () => {
+      clients.delete(ws);
+      const s = clientState.get(ws);
+      if (s?.moshiBridge) { s.moshiBridge.close(); }
+      clientState.delete(ws);
+    });
 
     // Handle incoming messages (binary = audio chunk, text = JSON)
     ws.on('message', (message, isBinary) => {
       if (isBinary) {
-        console.log(`[ws] Received binary message: ${message.byteLength} bytes`);
-        processChunk(ws, Buffer.from(message));
+        const buf = Buffer.from(message);
+        // In Moshi mode, forward audio directly to Moshi bridge
+        if (state.voiceMode === 'moshi' && state.moshiBridge && state.moshiBridge.isOpen()) {
+          // Browser sends Opus frames with 0x01 prefix — strip it and forward
+          if (buf.length > 1 && buf[0] === KIND_AUDIO) {
+            state.moshiBridge.sendAudio(buf.slice(1));
+          } else {
+            // Raw audio without prefix — forward as-is
+            state.moshiBridge.sendAudio(buf);
+          }
+          return;
+        }
+        // In Computer mode, process through Whisper STT pipeline
+        console.log(`[ws] Received binary message: ${buf.byteLength} bytes`);
+        processChunk(ws, buf);
         return;
       }
 
@@ -1194,12 +1331,52 @@ export function initWebSocket(wss, baseUrl) {
               }
             });
             break;
+          case 'voice_mode': {
+            const requestedMode = msg.data?.mode;
+            if (requestedMode === 'moshi') {
+              connectMoshiBridge(ws, state, baseUrl, sessionId).then(ok => {
+                if (ok) {
+                  state.voiceMode = 'moshi';
+                  state.moshiTextBuffer = '';
+                  sendTo(ws, 'voice_mode_changed', { mode: 'moshi' });
+                  console.log('[ws] Switched to Moshi mode');
+                }
+              });
+            } else if (requestedMode === 'computer') {
+              state.voiceMode = 'computer';
+              // Disconnect Moshi bridge if connected
+              if (state.moshiBridge) {
+                state.moshiBridge.close();
+                state.moshiBridge = null;
+              }
+              sendTo(ws, 'voice_mode_changed', { mode: 'computer' });
+              console.log('[ws] Switched to Computer mode');
+            }
+            break;
+          }
           case 'voice_start':
             console.log('[ws] voice_start received');
+            // Auto-connect to Moshi if available
+            isMoshiRunning().then(running => {
+              if (running) {
+                connectMoshiBridge(ws, state, baseUrl, sessionId).then(ok => {
+                  if (ok) {
+                    state.voiceMode = 'moshi';
+                    sendTo(ws, 'voice_mode_changed', { mode: 'moshi' });
+                  }
+                });
+              }
+            });
             sendTo(ws, 'status', { message: 'Voice assistant active' });
             break;
           case 'voice_cancel':
             console.log('[ws] voice_cancel received');
+            // Disconnect Moshi bridge
+            if (state.moshiBridge) {
+              state.moshiBridge.close();
+              state.moshiBridge = null;
+            }
+            state.voiceMode = 'computer';
             sendTo(ws, 'status', { message: 'Voice assistant inactive' });
             break;
           default:
