@@ -1,3 +1,31 @@
+/**
+ * Computer Server — Main Express + WebSocket entry point.
+ *
+ * Architecture:
+ *   HTTP: Express server on port 3141 (COMPUTER_PORT env var)
+ *   WebSocket: ws library sharing the same HTTP server (no separate port)
+ *   UI: Static files served from /ui/ — the LCARS web interface
+ *
+ * Security layers:
+ *   - Helmet: security headers (CSP, X-Frame-Options, etc.)
+ *   - CORS: same-origin only (localhost:3141)
+ *   - Rate limiting: 200 req/min general, 20 req/min for voice routes
+ *   - Auth: Bearer token required for API routes + WebSocket upgrades
+ *   - Request scanning: POST/PUT/PATCH bodies scanned for leaked secrets
+ *   - Response scanning: outgoing JSON scanned to prevent secret leakage
+ *
+ * Service initialization order:
+ *   1. Storage (SQLite for logs, transcripts, etc.)
+ *   2. VectorDB (LanceDB for knowledge base)
+ *   3. Auth token generation
+ *   4. Express middleware stack
+ *   5. API routes mounted under /api/
+ *   6. WebSocket server (voice pipeline)
+ *   7. Moshi MLX sidecar (optional, if installed)
+ *   8. Gmail OAuth (optional, if configured)
+ *   9. HTTP server listen on PORT
+ */
+
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
@@ -261,8 +289,23 @@ app.get('*', (req, res) => {
 });
 
 const server = createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ noServer: true });
 initWebSocket(wss, `http://localhost:${PORT}`);
+
+// Authenticate WebSocket upgrade requests before completing handshake
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url, 'http://localhost');
+  const token = url.searchParams.get('token');
+  const expected = getAuthToken();
+  if (!expected || token !== expected) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.emit('connection', ws, req);
+  });
+});
 
 server.listen(PORT, () => {
   const token = getAuthToken();

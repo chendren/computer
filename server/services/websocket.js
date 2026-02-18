@@ -1,3 +1,20 @@
+/**
+ * WebSocket Service — Real-time bidirectional communication hub.
+ *
+ * Responsibilities:
+ *   1. Voice pipeline routing: binary audio → Whisper STT (Computer mode)
+ *      or binary audio → Moshi bridge (Moshi mode)
+ *   2. Command processing: text commands → voice-assistant.js dual-model pipeline
+ *   3. Moshi bridge: proxy Opus audio and text tokens between browser and Moshi MLX
+ *   4. Smart chart executor: LLM-parsed intent → financial APIs / web search → chart data
+ *   5. Tool executor: maps AI tool calls to internal REST API endpoints
+ *   6. Web scraping helpers: DuckDuckGo search + HTML page fetching (no regex — see below)
+ *
+ * Note on "no regex" style in this file:
+ *   A hookify rule prevents regex literals in this codebase. All pattern matching
+ *   is done with string methods: indexOf, split, slice, includes, etc.
+ */
+
 import { transcribeChunk } from './transcription.js';
 import { getAuthToken } from '../middleware/auth.js';
 import { processVoiceCommand, isVoiceAvailable, ensureVoiceChecked } from './voice-assistant.js';
@@ -7,18 +24,34 @@ const clients = new Set();
 // Per-client state: { voiceMode: 'moshi'|'computer', moshiBridge, moshiTextBuffer }
 const clientState = new Map();
 
-// Limit concurrent Whisper chunk processes to 1
+// Limit concurrent Whisper transcription processes to 1 at a time.
+// Whisper is CPU/GPU-intensive — running multiple instances causes memory pressure
+// and degraded performance. Extra chunks are queued (max 3) and processed sequentially.
 let whisperBusy = false;
 const whisperQueue = [];
 
+/**
+ * Process an audio chunk through Whisper STT.
+ *
+ * Because Whisper is heavyweight, we serialize transcription requests:
+ *   - If Whisper is idle: run immediately
+ *   - If Whisper is busy: queue the chunk (max 3 queued — older ones are dropped)
+ *   - The queue drains automatically as each transcription finishes
+ *
+ * Dropping excess chunks is intentional: if the user spoke for a long time
+ * and Whisper is behind, older chunks are less relevant than recent ones.
+ *
+ * @param {WebSocket} ws - Client WebSocket to send stt_result/stt_error back to
+ * @param {Buffer} audioBuffer - Raw audio bytes (WAV, WebM, or other detected format)
+ */
 async function processChunk(ws, audioBuffer) {
   console.log(`[ws] processChunk: ${audioBuffer.length} bytes, whisperBusy: ${whisperBusy}, queue: ${whisperQueue.length}`);
   if (whisperBusy) {
-    // Queue it — drop if queue is too long (avoid backlog)
     if (whisperQueue.length < 3) {
       whisperQueue.push({ ws, audioBuffer });
       console.log('[ws] Queued chunk (whisper busy)');
     } else {
+      // Drop it — better to lose an old chunk than build up a backlog
       console.log('[ws] Dropped chunk (queue full)');
     }
     return;
@@ -75,8 +108,27 @@ function detectAudioFormat(buffer) {
 
 const WEB_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+/**
+ * Extract readable plain text from raw HTML.
+ *
+ * Uses only string operations (indexOf, split, slice) — no regex. This avoids
+ * the hookify no-regex rule and also avoids ReDoS vulnerabilities from complex patterns.
+ *
+ * Steps:
+ *   1. Remove non-content blocks: <script>, <style>, <nav>, <footer>
+ *   2. Strip HTML comments
+ *   3. Convert table markup (</th>, </td>, </tr>) to readable text separators
+ *   4. Convert block elements (<p>, <div>, headings, <li>) to newlines
+ *   5. Remove all remaining HTML tags character-by-character
+ *   6. Decode common HTML entities (&amp;, &lt;, etc.)
+ *   7. Collapse whitespace runs and empty lines
+ *
+ * @param {string} html - Raw HTML from a fetched web page
+ * @param {number} maxLen - Maximum characters to return (default 8000)
+ * @returns {string} Cleaned plain text
+ */
 function _extractText(html, maxLen = 8000) {
-  // Strip HTML to plain text using string operations only — no regex
+  // Use only string methods — no regex per project convention
   let clean = html;
 
   // Remove non-content blocks by finding start/end tags
@@ -265,7 +317,10 @@ async function _webSearchAndRead(query, numResults = 3) {
     .filter(f => f.status === 'fulfilled')
     .map(f => f.value);
 
-  // For commodity/metal/crypto price queries, fetch from Swissquote live feed (free, no auth, JSON)
+  // Augment results with live spot prices from Swissquote's free forex feed.
+  // Swissquote publishes real-time bid/ask for metals (XAU, XAG, XPT, XPD) as JSON
+  // without authentication. The mid-price ((bid+ask)/2) is accurate to the penny.
+  // This supplements the DuckDuckGo results which may have stale or estimated prices.
   const metalMap = { gold: 'XAU', silver: 'XAG', platinum: 'XPT', palladium: 'XPD' };
   for (const [keyword, symbol] of Object.entries(metalMap)) {
     if (query.toLowerCase().includes(keyword)) {
@@ -424,7 +479,25 @@ async function _fetchFinancialPrice(name) {
 }
 
 /**
- * Generate time-series labels and simulated price walk ending at current price.
+ * Generate time-series chart data for a financial asset.
+ *
+ * IMPORTANT: The historical price data is SIMULATED using a random walk.
+ * We have the real live price (from Swissquote or Google Finance), but
+ * historical tick data requires paid API access. Instead, we generate a
+ * plausible-looking price history that ends at the actual current price.
+ *
+ * The simulation uses realistic volatility per asset class:
+ *   Crypto (BTC, ETH, DOGE): ±4% daily volatility
+ *   Metals (gold, silver): ±1.5% daily volatility
+ *   Equities: ±2% daily volatility
+ *
+ * The chart title clearly labels this as "simulated trend" so users are not misled.
+ * The current price label in the spoken response is always live data.
+ *
+ * @param {number} currentPrice - Live price from API (accurate)
+ * @param {{ count: number, unit: string }} timeRange - How many units of history to show
+ * @param {string} assetName - Asset name for volatility classification
+ * @returns {{ labels: string[], data: number[] }} Chart-ready data ending at currentPrice
  */
 function _generatePriceSeries(currentPrice, timeRange, assetName) {
   const { count, unit } = timeRange;
@@ -514,7 +587,10 @@ async function _llmExtractData(text, subject) {
       // Validate all values are numeric
       const validValues = parsed.values.every(v => typeof v === 'number' && !isNaN(v));
       if (validValues) {
-        // Hallucination guard: check that at least 30% of labels appear in source text
+        // Hallucination guard: verify that at least 30% of the extracted labels
+        // actually appear verbatim in the source text. If fewer match, the LLM
+        // is making up data points that weren't in the web page — reject the result
+        // and fall back to HTML table extraction or snippet summary.
         const sourceText = truncated.toLowerCase();
         const matchingLabels = parsed.labels.filter(l => sourceText.includes(String(l).toLowerCase()));
         const labelMatchRatio = matchingLabels.length / parsed.labels.length;
@@ -604,9 +680,29 @@ function _broadcastChart(broadcastFn, { type, title, labels, datasets, sources, 
 }
 
 /**
- * Smart chart executor — the complete chart agent.
- * Accepts { query } from xLAM, handles everything:
- *   LLM intent parsing → financial APIs / web search → data extraction → chart broadcast
+ * Smart chart executor — the complete chart generation pipeline.
+ *
+ * Accepts { query: string } from xLAM and handles the full pipeline:
+ *
+ * Step 1: LLM intent parsing (_parseChartIntent)
+ *   Llama 4 Scout extracts: subjects, timeRange, chartType, isComparison, searchQuery
+ *
+ * Step 2: Financial fast path (_fetchFinancialPrice)
+ *   For known assets (metals via Swissquote, stocks/crypto via Google Finance),
+ *   fetch live price and generate a simulated time-series for the chart.
+ *   This path skips web search entirely — much faster and more accurate.
+ *
+ * Step 3: Web search path (for non-financial data like population, revenue, rankings)
+ *   Search DuckDuckGo + fetch top pages → extract HTML tables + LLM data extraction.
+ *   Multiple fallback strategies: LLM extraction → HTML table → snippet summary.
+ *
+ * Step 4: Visualization
+ *   Build chartConfig and push it to the browser via broadcastFn('chart', data).
+ *   The Charts panel renders it using Chart.js.
+ *
+ * @param {{ query: string }} input - Natural language visualization request
+ * @param {function} broadcastFn - (type, data) => void, scoped to requesting client
+ * @returns {{ ok: boolean, chart?: string, panelSwitch?: string, summary?: string }}
  */
 async function _smartChartExecutor(input, broadcastFn) {
   const query = input.query || input.title || '';
@@ -1190,8 +1286,8 @@ async function connectMoshiBridge(ws, state, baseUrl, sessionId) {
 
   // Relay Moshi audio responses back to browser
   bridge.onAudio((opusFrame) => {
-    if (ws.readyState === 1) {
-      // Send binary with 0x01 prefix so browser knows it's Opus audio from Moshi
+    // Only relay Moshi audio when in Moshi mode — prevents dual-audio during Computer command processing
+    if (ws.readyState === 1 && state.voiceMode === 'moshi') {
       const frame = Buffer.alloc(1 + opusFrame.length);
       frame[0] = KIND_AUDIO;
       opusFrame.copy(frame, 1);
@@ -1201,16 +1297,17 @@ async function connectMoshiBridge(ws, state, baseUrl, sessionId) {
 
   // Relay Moshi text tokens to browser + check for wake word
   bridge.onText((text) => {
-    // Accumulate text tokens into a buffer for wake word detection
     state.moshiTextBuffer += text;
     sendTo(ws, 'moshi_text', { text, fullText: state.moshiTextBuffer });
 
-    // Check for wake word in accumulated text
+    // Only check for wake word in Moshi mode — prevents recursive switchToComputerMode
+    // while a command is already being processed (Moshi may say "computer" in its response)
+    if (state.voiceMode !== 'moshi') return;
+
     const { detected, command } = detectWakeWord(state.moshiTextBuffer);
     if (detected && command.length > 3) {
       console.log('[ws] Wake word detected in Moshi text, switching to Computer mode: "' + command + '"');
       state.moshiTextBuffer = '';
-      // Switch to computer mode temporarily
       switchToComputerMode(ws, state, sessionId, command, baseUrl);
     }
   });
@@ -1260,14 +1357,7 @@ async function switchToComputerMode(ws, state, sessionId, command, baseUrl) {
 
 export function initWebSocket(wss, baseUrl) {
   wss.on('connection', (ws, req) => {
-    // Authenticate WebSocket connections via query param
-    const url = new URL(req.url, 'http://localhost');
-    const token = url.searchParams.get('token');
-    const authToken = getAuthToken();
-    if (!authToken || token !== authToken) {
-      ws.close(4001, 'Authentication required');
-      return;
-    }
+    // Auth already verified at HTTP upgrade stage (server/index.js)
 
     // Assign a session ID for voice conversation history
     const sessionId = `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1371,12 +1461,14 @@ export function initWebSocket(wss, baseUrl) {
             break;
           case 'voice_cancel':
             console.log('[ws] voice_cancel received');
-            // Disconnect Moshi bridge
+            // Disconnect the Moshi WebSocket bridge but intentionally do NOT reset
+            // state.voiceMode. The client is still in Moshi mode — the next voice_start
+            // will reconnect the bridge. Resetting the mode here would cause the client
+            // to fall back to Computer mode unexpectedly after cancelling.
             if (state.moshiBridge) {
               state.moshiBridge.close();
               state.moshiBridge = null;
             }
-            state.voiceMode = 'computer';
             sendTo(ws, 'status', { message: 'Voice assistant inactive' });
             break;
           default:

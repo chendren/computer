@@ -1,6 +1,6 @@
-# Computer — Star Trek Enterprise AI Agent
+# Computer — USS Enterprise AI System
 
-A Claude Code plugin that brings the USS Enterprise computer to life. Self-contained local AI voice assistant with an LCARS-themed web interface featuring **full-duplex speech-to-speech conversation via Moshi** (~200ms latency), dual-model tool routing via Ollama (Llama 4 Scout + xLAM), vector knowledge base, data visualization, web search, Gmail integration, monitoring, and 19 interactive panels — all running entirely on your machine with zero external API dependencies.
+A Claude Code plugin that turns your machine into the USS Enterprise main computer. Speak to it. Ask it questions. Have it pull up charts, check your email, search the web, or set a red alert — all through a real Star Trek LCARS interface running entirely on your own hardware.
 
 ![LCARS Interface](https://img.shields.io/badge/UI-LCARS%20Theme-FF9900?style=flat-square&labelColor=000000)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-CC99CC?style=flat-square&labelColor=000000)
@@ -8,202 +8,257 @@ A Claude Code plugin that brings the USS Enterprise computer to life. Self-conta
 ![LanceDB](https://img.shields.io/badge/Vector%20DB-LanceDB-55CC55?style=flat-square&labelColor=000000)
 ![Moshi](https://img.shields.io/badge/Voice-Moshi%20Speech--to--Speech-33CCFF?style=flat-square&labelColor=000000)
 ![Ollama](https://img.shields.io/badge/LLM-Llama%204%20Scout%20%2B%20xLAM%20via%20Ollama-66CCFF?style=flat-square&labelColor=000000)
-![Self-Contained](https://img.shields.io/badge/Mode-LOCAL%20(self--contained)-55CC55?style=flat-square&labelColor=000000)
+![Self-Contained](https://img.shields.io/badge/Mode-100%25%20Local-55CC55?style=flat-square&labelColor=000000)
 
 ---
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Features](#features)
+- [What Is This?](#what-is-this)
+- [Why Build It?](#why-build-it)
+- [What Can It Do?](#what-can-it-do)
+- [How It Works](#how-it-works)
+  - [The Voice Pipeline](#the-voice-pipeline)
+  - [The Dual-Model Brain](#the-dual-model-brain)
+  - [The LCARS Interface](#the-lcars-interface)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Usage](#usage)
-  - [Slash Commands](#slash-commands)
-  - [Web UI Panels](#web-ui-panels)
-  - [Voice Interaction](#voice-interaction)
-  - [Smart Voice Routing](#smart-voice-routing)
+- [Deployment Guide](#deployment-guide)
+  - [1. Install System Dependencies](#1-install-system-dependencies)
+  - [2. Clone and Install](#2-clone-and-install)
+  - [3. Pull AI Models](#3-pull-ai-models)
+  - [4. Set Up Moshi Voice (Recommended)](#4-set-up-moshi-voice-recommended)
+  - [5. Register as a Claude Code Plugin](#5-register-as-a-claude-code-plugin)
+  - [6. Set Up Gmail (Optional)](#6-set-up-gmail-optional)
+  - [7. Start and Verify](#7-start-and-verify)
+- [Voice Interaction Guide](#voice-interaction-guide)
+  - [Moshi Mode — Natural Conversation](#moshi-mode--natural-conversation)
+  - [Computer Mode — Tool Commands](#computer-mode--tool-commands)
+  - [Voice Command Reference](#voice-command-reference)
+- [The 19 LCARS Panels](#the-19-lcars-panels)
 - [API Reference](#api-reference)
+  - [Authentication](#authentication)
   - [REST Endpoints](#rest-endpoints)
-  - [Knowledge Base API](#knowledge-base-api)
-  - [Gateway API (Local Services)](#gateway-api-local-services)
-  - [WebSocket Events](#websocket-events)
-- [Moshi Speech-to-Speech](#moshi-speech-to-speech)
-  - [Dual-Mode Voice Architecture](#dual-mode-voice-architecture)
-  - [Moshi Protocol](#moshi-protocol)
-  - [Wake Word Switching](#wake-word-switching)
-  - [Moshi API](#moshi-api)
-- [Gmail Integration](#gmail-integration)
-- [Server Components](#server-components)
-  - [Middleware](#middleware)
-  - [Routes](#routes)
-  - [Services](#services)
-- [UI Components](#ui-components)
-  - [JavaScript Modules](#javascript-modules)
-  - [CSS Design System](#css-design-system)
-- [Plugin Components](#plugin-components)
-  - [Commands](#commands)
-  - [Agents](#agents)
-  - [Skills](#skills)
-  - [Hooks](#hooks)
-- [Vector Knowledge Base](#vector-knowledge-base)
-  - [Chunking Strategies](#chunking-strategies)
-  - [Search Methods](#search-methods)
-  - [Knowledge API Examples](#knowledge-api-examples)
-- [Security](#security)
-- [Data Storage](#data-storage)
+  - [WebSocket Protocol](#websocket-protocol)
 - [Configuration](#configuration)
+- [Running Tests](#running-tests)
 - [Troubleshooting](#troubleshooting)
-- [File Structure](#file-structure)
+- [Security Model](#security-model)
+- [Project Structure](#project-structure)
 
 ---
 
-## Overview
+## What Is This?
 
-Computer is a Claude Code plugin that functions as an AI assistant modeled after the Star Trek USS Enterprise computer. It runs a self-contained Express + WebSocket server on port 3141, serving an LCARS-themed single-page application with 19 panels covering voice interaction, AI analysis, data visualization, web search, Gmail, monitoring, knowledge management, and more.
+Computer is a self-contained AI assistant styled after the USS Enterprise computer from Star Trek. It runs as a Claude Code plugin — meaning it auto-starts when you open a Claude Code session and integrates directly with your AI workflow.
 
-**Key design principles:**
-- **Fully self-contained** — All services run locally. No external gateway or cloud APIs required. Voice transcription via Whisper, text-to-speech via Coqui TTS, dual-model LLM inference via Ollama, vision analysis via Ollama, embeddings via Ollama
-- **Moshi speech-to-speech** — Full-duplex voice conversation via Moshi MLX with ~200ms latency, running natively on Apple Silicon. Seamlessly switches to tool-augmented Computer mode on wake word
-- **Dual-model voice pipeline** — xLAM 8B for deterministic tool routing + Llama 4 Scout for conversational responses. 25+ tools including web search, charts, email, knowledge base, and more
-- **Vector-powered knowledge** — LanceDB with nomic-embed-text (768-dim) for semantic search with 6 chunking strategies and 6 search methods
-- **Real-time** — WebSocket pushes data to the browser instantly as commands complete
-- **Vanilla JS** — No build step, no framework — ES modules served directly by Express
-- **Gmail integration** — Direct OAuth-based Gmail access for reading, sending, and managing email
-- **LCARS aesthetic** — Authentic Star Trek computer interface with the signature orange/lavender/blue color palette
+You interact with it two ways:
+
+1. **Voice** — Click the diamond button in the browser UI, speak naturally. The system listens, understands, acts, and speaks back. Say "Computer, what's the gold price?" and it will search the web, synthesize an answer, and speak it to you — all within 1–2 seconds.
+
+2. **Slash commands** — Type `/computer:analyze`, `/computer:search`, `/computer:know` etc. directly in your Claude Code session. Results appear both in the terminal and are pushed to the LCARS browser interface in real-time.
+
+Everything runs on your own machine. No cloud voice APIs, no external AI services, no usage costs beyond your hardware.
 
 ---
 
-## Features
+## Why Build It?
 
-### Moshi Full-Duplex Voice (NEW)
-- **Speech-to-speech in ~200ms** — Moshi MLX runs natively on Apple Silicon via the Metal GPU framework. True full-duplex: speak and hear responses simultaneously, like a real conversation
-- **Dual-mode voice** — **Moshi mode** (default): always-listening natural conversation. **Computer mode**: say "Computer, ..." to trigger tool-augmented commands with web search, charts, email, etc.
-- **Automatic mode switching** — Wake word "Computer" in Moshi's transcript triggers a seamless switch to Computer mode. After the command executes, switches back to Moshi mode
-- **Opus audio streaming** — Browser captures at 24kHz, encodes to Opus via WebCodecs API, streams over WebSocket. Moshi responses stream back as Opus frames for real-time playback
-- **Live transcript** — Moshi's text output displayed in the status bar in real-time
-- **Mode toggle** — CMD/MOSHI button in the title bar to manually switch modes
-- **Cyan visual indicator** — Diamond button pulses cyan when Moshi is active
+**The problem:** AI assistants that depend on cloud APIs are inherently limited — latency kills conversational flow, data leaves your machine, and costs compound at scale.
 
-### Always-Listening Voice Assistant (Computer Mode)
-- **Wake word activation** — Say "Computer" followed by a command. Always-on listening via Silero VAD (Voice Activity Detection) in-browser via ONNX Runtime WebAssembly
-- **Dual-model tool use** — xLAM 8B routes to 25+ tools, Llama 4 Scout generates conversational responses. Zero API cost
-- **Full voice pipeline** — VAD detects speech, Whisper STT transcribes, wake word detection, xLAM routes tools, Scout generates response, Coqui TTS speaks, audio plays in browser
-- **Interruption support** — Speak during TTS playback to interrupt and issue a new command
-- **Visual state indicator** — Diamond button with color-coded states: amber pulse (listening), bright amber (capturing), red pulse (thinking), green pulse (speaking)
-- **25+ voice tools** — Knowledge search/store, captain's log, charts, web search, email (check/send/reply/summarize/followups), panel switching, alerts, reminders, monitors, browse URLs, and more
-- **Auto-search for live data** — Queries about prices, weather, stocks, news automatically trigger web search via DuckDuckGo + Instant Answers API + page content fetching
-- **Smart chart generation** — "Show me gold prices" or "Chart Amazon vs Tesla" triggers LLM-powered intent parsing, financial API lookups, web data extraction, and Chart.js visualization
-- **Session memory** — Per-WebSocket conversation history (20 turns, 4hr TTL)
+**The vision:** What if your AI assistant felt like the Enterprise computer? Instant acknowledgment, conversational speed, always listening, able to take real action — not just answer questions.
 
-### Gmail Integration
-- **OAuth authentication** — Authorize Gmail directly from the LCARS UI
-- **Inbox & threads** — Browse inbox, read full email threads, folder navigation
-- **Send & reply** — Compose new emails or reply within threads
-- **Voice-accessible** — "Computer, check my email", "Computer, summarize my inbox", "Computer, reply to John's email"
-- **Follow-up detection** — Identifies emails needing responses
+**The approach:**
+- **Speech-to-speech via Moshi** — Kyutai's Moshi model runs the full voice loop (hear→understand→respond) as a single neural network on Apple Silicon via MLX. ~200ms latency instead of ~3-5 seconds for chain-of-models approaches. No STT→LLM→TTS pipeline needed.
+- **Tool-augmented commands via "Computer"** — When you say "Computer," you want action, not just conversation. A wake word triggers a switch to a dual-model tool pipeline: xLAM 8B routes to tools (web search, charts, email, etc.), Llama 4 Scout generates the spoken response. Full agentic capabilities triggered by voice.
+- **Local LLMs only** — Ollama runs Llama 4 Scout and xLAM entirely on your hardware. No API keys, no per-token cost, no data leaving your network.
+- **LCARS for real** — Not just aesthetic. The 19-panel interface is a functional dashboard: live charts, email threads, knowledge base, monitoring, and more — all pushed in real-time via WebSocket as the AI completes work.
 
-### AI Analysis
-- **Sentiment analysis** — Tone classification with confidence score and breakdown bar
-- **Topic extraction** — Key themes with relevance scores as color-coded LCARS tags
-- **Action items** — Extracted with priority levels (high/medium/low)
-- **Entity recognition** — People, organizations, locations, dates, technical terms
-- **Summary generation** — Concise 2-3 sentence summaries
-- **Media analysis** — Upload images/video for AI analysis via Ollama vision models
-- **Structured JSON output** — Analysis via Llama 4 Scout with `response_format: json_object`
+---
 
-### Interactive Panels (19)
-- **Dashboard** — Bridge console: system stats, Moshi status, Ollama status, Gmail status, security score
-- **Main** — Chat with Claude via SSE streaming
-- **Transcript** — Live STT, file upload, timestamped entries
-- **Analysis** — Sentiment bars, topic tags, entities, action items
-- **Charts** — Chart.js v4 with LCARS theming, smart data visualization
-- **Knowledge** — Vector search with method selection, metadata filters
-- **Channels** — Gmail compose, inbox, threads, OAuth
-- **Search** — Web search results with clickable links
-- **Log** — Captain's log with stardates and categories
-- **Monitor** — Active monitors with status dots and check history
-- **Compare** — Side-by-side diffs with similarity bars
-- **Gateway** — Sessions, agents, models (all local services)
-- **Plugins** — Plugin/hook/tool registry
-- **Cron** — Scheduled jobs with event log
-- **Browser** — URL bar + viewport
-- **Nodes** — Local device info with camera/screen capture
-- **Security** — Shield gauge + redaction stats
+## What Can It Do?
 
-### Vector Knowledge Base
-- **LanceDB** with nomic-embed-text embeddings (768-dim) via Ollama
-- **6 chunking strategies** — Fixed, sentence, paragraph, sliding window, semantic, recursive
-- **6 search methods** — Vector, BM25, hybrid, metadata, MMR, multi-query with RRF
+### Voice (Moshi Full-Duplex)
+- Natural conversation at ~200ms latency
+- Always-on listening in Moshi mode — no button press needed
+- Say "Computer" to trigger tool-augmented commands without leaving conversation mode
+- Hear responses in Moshi's synthesized voice while the panel auto-updates with visual data
+
+### Voice (Computer Mode — Tool Commands)
+- **Web search** — Real-time DuckDuckGo + page fetching. "Computer, search for the latest on GPT-5"
+- **Live financial data** — Spot prices from Swissquote (metals: gold/silver/platinum/palladium) and Google Finance (stocks/crypto). "Computer, what's the gold price?"
+- **Smart charts** — Natural language to Chart.js visualization. "Computer, show me Tesla vs Apple stock this month" → line chart with live data
+- **Email** — Check inbox, read emails, send replies, get follow-up summaries. "Computer, summarize my inbox"
+- **Knowledge base** — Semantic search over stored facts. "Computer, what do we know about the project timeline?"
+- **Captain's log** — Timestamped log entries with stardates. "Computer, log: mission briefing completed"
+- **System control** — Panel switching, alerts, reminders, monitoring. "Computer, red alert" / "Computer, show me the charts panel"
+- **AI analysis** — Sentiment, topics, entities, action items from text
+- **Reminders** — "Computer, remind me in 30 minutes to check the build"
 
 ### Data Visualization
-- **Smart chart agent** — Natural language to chart: "Show me Tesla stock this month", "Compare US and China population"
-- **Chart.js v4** — Line, bar, pie, doughnut, radar, polar area, scatter
-- **Financial fast paths** — Live prices from Swissquote (metals) and Google Finance (stocks/crypto)
-- **Table mode** — "Show me a table of..." renders interactive data tables
-- **Source attribution** — Charts link back to data sources
+- Natural language chart requests ("bar chart of population by country")
+- Live financial prices as time-series charts
+- Table rendering for structured data
+- Source attribution links on every chart
+
+### Knowledge Base
+- LanceDB vector database with nomic-embed-text embeddings (768 dimensions)
+- 6 chunking strategies: fixed, sentence, paragraph, sliding window, semantic, recursive
+- 6 search methods: vector similarity, keyword (BM25), hybrid, MMR, multi-query with RRF
+- Store and retrieve facts through voice or API
+
+### Gmail Integration
+- Full inbox access via OAuth — no password stored
+- Read full email threads
+- Compose and send email
+- AI-generated follow-up detection
+- All accessible by voice
+
+### Monitoring and Cron
+- Watch URLs, files, and processes for changes
+- Minute-level cron scheduling with event log
+- Desktop notifications on macOS
+
+---
+
+## How It Works
+
+### The Voice Pipeline
+
+Here is the complete path from your mouth to the computer's voice, step by step:
+
+#### Moshi Mode (default)
+
+```
+1. You speak into your microphone
+2. Browser captures audio via MediaDevices API at 24kHz mono
+3. WebCodecs AudioEncoder compresses audio to Opus format (~80ms frames)
+4. Each Opus frame gets a 0x01 kind byte prefix and is sent over WebSocket
+5. LCARS server (port 3141) receives binary frames and forwards them to Moshi (port 8998)
+6. Moshi processes audio in real-time — it's a single neural network, so
+   speech understanding and response generation happen simultaneously
+7. Moshi sends back:
+   - Opus audio frames (0x01 kind) → LCARS relays to browser → decoded by WebCodecs
+     AudioDecoder → played through AudioContext (seamlessly scheduled for zero gaps)
+   - UTF-8 text tokens (0x02 kind) → displayed in status bar as live transcript
+8. If the transcript contains "Computer, [command]", the server:
+   a. Pauses Moshi audio relay to browser (no dual-audio conflict)
+   b. Stops sending your mic audio to Moshi
+   c. Runs the command through the Computer Mode pipeline (see below)
+   d. Resumes Moshi mode when done
+```
+
+#### Computer Mode (wake word triggered)
+
+```
+1. Wake word "Computer" detected in Moshi transcript (or you're in Computer mode)
+2. Silero VAD (Voice Activity Detection) detects speech start/end in-browser
+   — runs as ONNX Runtime WebAssembly, entirely in-browser, no server round-trip
+3. Captured speech sent as WAV blob over WebSocket to LCARS server
+4. Whisper STT transcribes the WAV → "what time is it"
+5. xLAM 8B (Salesforce Large Action Model) receives transcription
+   — deterministic tool routing: picks get_time tool, returns structured JSON
+6. get_time executes locally → {time, date, stardate}
+7. Response shortcut: no LLM needed for known-format tools → pre-built spoken string
+   "The time is 10:07 AM. Wednesday, February 18, 2026. Stardate 102.132."
+8. Coqui TTS synthesizes the text → WAV file saved to disk
+9. LCARS sends voice_response event with audioUrl to browser
+10. Browser fetches WAV, plays through HTML5 Audio
+11. VAD resumes listening, state returns to MOSHI_ACTIVE
+```
+
+#### Why Two Models Instead of One?
+
+Routing tool calls deterministically requires a model fine-tuned for JSON function calling — xLAM 8B (Salesforce's Large Action Model) is specifically trained for this and is faster and more reliable at tool selection than a general-purpose LLM. Llama 4 Scout handles the conversational response because it's a 17B MoE model with much better natural language quality for longer/nuanced answers. Each model does what it's best at.
+
+#### Why Moshi Instead of Whisper+TTS?
+
+The traditional chain — Whisper (STT) → LLM → TTS — has irreducible latency from three sequential model inferences. Moshi is a single end-to-end speech model: it processes audio continuously and generates audio continuously. The result is ~200ms perceived latency versus 3–5 seconds for the chain. It also enables true full-duplex: Moshi can start responding before you've finished speaking.
+
+### The Dual-Model Brain
+
+```
+User input (text or voice)
+        │
+        ▼
+   ┌─────────────┐
+   │   xLAM 8B   │  ← Salesforce Large Action Model, fine-tuned for tool routing
+   │  (tool pick)│    Fast, deterministic, returns JSON tool calls
+   └──────┬──────┘
+          │ tool_calls: [{name: "web_search_and_read", args: {...}}]
+          ▼
+   ┌─────────────────┐
+   │  Tool Executor  │  ← 25+ tools: search, charts, email, knowledge, etc.
+   │  (run the tools)│    Results are real data, not hallucinated
+   └──────┬──────────┘
+          │ tool_results: [{content: "Gold price: $2,847/oz..."}]
+          ▼
+   ┌──────────────────┐
+   │  Llama 4 Scout   │  ← Meta Llama 4 Scout (17B MoE), runs on Ollama
+   │  (write response)│    Generates conversational spoken response from data
+   └──────┬───────────┘
+          │ "The current gold spot price is twenty-eight forty-seven per troy ounce."
+          ▼
+      Coqui TTS → WAV → Browser
+```
+
+Many tools bypass Llama 4 Scout entirely (shortcut paths) for speed and accuracy — `get_time`, `set_alert`, `check_email`, `generate_chart`, `create_reminder`, etc. use pre-built response templates from the tool output, avoiding any chance of the LLM hallucinating numbers or facts.
+
+### The LCARS Interface
+
+The browser UI is a single-page application (no framework, no build step — pure vanilla JavaScript ES modules served directly by Express). It maintains a persistent WebSocket connection to the server. As the AI completes work, it pushes results over WebSocket and the relevant panel auto-updates:
+
+- A voice command for a chart → `chart` WebSocket event → chart panel renders → `voice_panel_switch` event → UI switches to charts panel
+- A voice command for email → `voice_response` with data → channels panel shown
+- An alert → `alert_status` event → entire UI flashes the alert color
+
+The 19 panels share a common pattern: they register a WebSocket message handler in their constructor, and the server pushes data to them as events complete. No polling, no manual refresh.
 
 ---
 
 ## Architecture
 
 ```
-                                ┌─────────────────────────────────────────┐
-                                │         Claude Code CLI Session          │
-                                │  /computer:analyze, /computer:know, ... │
-                                └────────────────┬────────────────────────┘
-                                                 │ HTTP POST
-                                                 ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    Express + WebSocket Server (:3141)                            │
-│                                                                                 │
-│  Middleware                      WebSocket Handler                               │
-│  ├── Helmet (CSP, X-Frame)      ├── Auth via ?token= query param                │
-│  ├── CORS (same-origin only)    ├── Dual-mode voice routing                     │
-│  ├── Rate limiting (200/min)    │   ├── Moshi mode: binary audio → Moshi bridge │
-│  ├── Bearer token auth          │   └── Computer mode: audio → Whisper STT      │
-│  ├── Security scan (in+out)     ├── Voice command processing (25+ tools)         │
-│  └── Secret redaction           ├── Smart chart executor                         │
-│                                 └── Web search + auto-fetch                      │
-│  Local Services                                                                  │
-│  ├── config.js      — JSON config (data/config.json)                            │
-│  ├── models.js      — Ollama model listing + capability detection               │
-│  ├── sessions.js    — Voice session tracking                                    │
-│  ├── agents.js      — Agent definitions from agents/*.md (YAML frontmatter)     │
-│  ├── vision.js      — Image/video analysis via Ollama vision models             │
-│  ├── node-local.js  — Local machine as "node 0" (camera, screen, commands)      │
-│  ├── cron-scheduler.js — Local cron with minute-level granularity               │
-│  ├── plugins.js     — Static tool/hook/plugin registry                          │
-│  ├── moshi.js       — Moshi sidecar manager + WebSocket bridge                  │
-│  ├── gmail.js       — Direct Gmail API via OAuth                                │
-│  └── voice-assistant.js — Dual-model (xLAM + Scout) + 25+ tools                │
-│                                                                                 │
-│  REST API: /api/knowledge/*, /api/transcribe/*, /api/tts/*, /api/claude/*,      │
-│            /api/media/*, /api/voice/*, /api/gateway/*, /api/gmail/*             │
-└──────────────┬──────────────────────────────────────────────┬───────────────────┘
-               │ WebSocket bridge                              │ WebSocket broadcast
-               ▼                                               ▼
-┌──────────────────────────┐            ┌─────────────────────────────────────────┐
-│  Moshi MLX Sidecar       │            │           LCARS Web UI (Browser)        │
-│  Port 8998               │            │                                         │
-│  ├── Speech-to-speech    │            │  ┌────────────┐  ┌───────────────────┐  │
-│  ├── ~200ms latency      │            │  │ Sidebar    │  │ Active Panel      │  │
-│  ├── Opus audio I/O      │            │  │ 19 panels  │  │ (one of 19)       │  │
-│  ├── Text transcript     │            │  └────────────┘  └───────────────────┘  │
-│  └── MLX on Apple Silicon│            │  ┌────────────────────────────────────┐  │
-└──────────────────────────┘            │  │ ◆ Voice │ CMD/MOSHI │ Status Bar  │  │
-                                        │  └────────────────────────────────────┘  │
-               ▲                        │  WebCodecs Opus encode/decode            │
-               │                        │  Silero VAD (ONNX Runtime WASM)          │
-               │                        └─────────────────────────────────────────┘
-               │
-┌──────────────┴──────────────┐
-│  Ollama (localhost:11434)    │
-│  ├── llama4:scout           │
-│  ├── xLAM 8B F16            │
-│  └── nomic-embed-text       │
-└─────────────────────────────┘
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                    Claude Code CLI Session                        │
+  │  /computer:analyze, /computer:know, /computer:search ...         │
+  └───────────────────────────────┬──────────────────────────────────┘
+                                  │ HTTP POST
+                                  ▼
+  ┌──────────────────────────────────────────────────────────────────┐
+  │              Express + WebSocket Server (port 3141)              │
+  │                                                                  │
+  │  Security Layer                   WebSocket Handler              │
+  │  ├── Helmet (CSP, X-Frame)       ├── Auth: ?token= query param   │
+  │  ├── CORS (localhost only)        ├── Binary routing:            │
+  │  ├── Rate limiting (200/min)      │   0x01 → Moshi bridge        │
+  │  ├── Bearer token auth            │   WAV/WebM → Whisper STT     │
+  │  └── Secret redaction            ├── JSON messages:              │
+  │                                  │   voice_command → tool loop   │
+  │  REST API Routes                  │   voice_start → Moshi connect │
+  │  ├── /api/knowledge/*            └── voice_cancel → disconnect   │
+  │  ├── /api/tts/*, /api/transcribe/*                               │
+  │  ├── /api/voice/*, /api/media/*                                  │
+  │  ├── /api/gmail/*                                                │
+  │  └── /api/gateway/* (local services: agents, nodes, sessions)    │
+  └──────────────┬───────────────────────────────────┬───────────────┘
+                 │ WebSocket bridge                   │ WebSocket push
+                 ▼                                    ▼
+  ┌──────────────────────┐     ┌────────────────────────────────────────┐
+  │   Moshi MLX Sidecar  │     │         LCARS Web UI (Browser)         │
+  │   port 8998          │     │                                        │
+  │                      │     │  Sidebar (19 panels) + Active Panel    │
+  │  Opus I/O at 24kHz   │     │  ◆ Voice button  │ MOSHI/CMD toggle   │
+  │  ~200ms S2S latency  │     │  Status bar (live transcript)          │
+  │  MLX on Apple Silicon│     │                                        │
+  └──────────────────────┘     │  WebCodecs: Opus encode/decode         │
+                                │  Silero VAD (ONNX WASM, in-browser)   │
+  ┌──────────────────────┐     └────────────────────────────────────────┘
+  │    Ollama (:11434)   │
+  │  ├── llama4:scout    │  ← Conversational responses
+  │  ├── xLAM 8B F16     │  ← Tool routing
+  │  └── nomic-embed-text│  ← Knowledge base embeddings
+  └──────────────────────┘
 ```
 
 ---
@@ -212,81 +267,131 @@ Computer is a Claude Code plugin that functions as an AI assistant modeled after
 
 ### Required
 
+| Tool | Version | Purpose | Install |
+|------|---------|---------|---------|
+| **Node.js** | v18+ | Server runtime | `brew install node` |
+| **Ollama** | latest | Local LLM inference | `brew install ollama` |
+| **Claude Code** | latest | Plugin host | [Install guide](https://docs.anthropic.com/en/docs/claude-code) |
+
+### Required AI Models (via Ollama)
+
+| Model | Size | Purpose | Command |
+|-------|------|---------|---------|
+| **nomic-embed-text** | 274MB | Knowledge base embeddings | `ollama pull nomic-embed-text` |
+| **llama4:scout** | ~30GB | Conversation + analysis | `ollama pull llama4:scout` |
+| **xLAM 8B F16** | ~16GB | Deterministic tool routing | `ollama pull hf.co/Salesforce/Llama-xLAM-2-8b-fc-r-gguf:F16` |
+
+> **Apple Silicon note:** Llama 4 Scout and xLAM will run fully on the Metal GPU via Ollama's MLX backend. A Mac with 32GB RAM handles both simultaneously. 64GB is comfortable.
+
+### For Moshi Voice (Recommended)
+
 | Tool | Purpose | Install |
 |------|---------|---------|
-| **Node.js** (v18+) | Server runtime | `brew install node` |
-| **Claude Code** | CLI tool for AI capabilities | [Install guide](https://docs.anthropic.com/en/docs/claude-code) |
-| **Ollama** | Local LLM inference + embeddings | `brew install ollama` |
-| **nomic-embed-text** | Embedding model (768-dim) | `ollama pull nomic-embed-text` |
+| **Python 3.12** | Moshi runtime | `brew install python@3.12` |
+| **moshi_mlx** | Speech-to-speech model | `pip install moshi_mlx` |
+| ~5GB disk | Moshi model weights | Auto-downloaded on first run |
 
-### Recommended
-
-| Tool | Purpose | Install |
-|------|---------|---------|
-| **Llama 4 Scout** | Voice conversation + analysis | `ollama pull llama4:scout` |
-| **xLAM 8B F16** | Deterministic tool routing | `ollama pull hf.co/Salesforce/Llama-xLAM-2-8b-fc-r-gguf:F16` |
-| **Python 3.12** | Moshi MLX runtime | `brew install python@3.12` |
-
-### Optional
+### For Computer Mode Voice (Optional — Moshi preferred)
 
 | Tool | Purpose | Install |
 |------|---------|---------|
-| **OpenAI Whisper** | Local speech-to-text | `pip install openai-whisper` |
-| **Coqui TTS** | Local text-to-speech | `pip install TTS` |
+| **OpenAI Whisper** | Speech transcription (STT) | `pip install openai-whisper` |
+| **Coqui TTS** | Text-to-speech | `pip install TTS` |
 | **FFmpeg** | Audio/video processing | `brew install ffmpeg` |
+
+> You can run Computer Mode voice commands without Moshi if you have Whisper + Coqui installed. Moshi gives a dramatically better conversational experience.
 
 ---
 
-## Installation
+## Deployment Guide
 
-### 1. Clone the repository
+### 1. Install System Dependencies
 
 ```bash
-git clone https://github.com/chendren/computer.git ~/.claude/plugins/computer
+# Node.js (if not installed)
+brew install node
+
+# Ollama (local LLM runtime)
+brew install ollama
+
+# Python 3.12 (for Moshi)
+brew install python@3.12
+
+# FFmpeg (for audio/video, optional)
+brew install ffmpeg
+
+# Start Ollama as a background service
+ollama serve &
 ```
 
-### 2. Install Node.js dependencies
+### 2. Clone and Install
 
 ```bash
+# Clone into the Claude plugins directory
+git clone https://github.com/chendren/computer.git ~/.claude/plugins/computer
+
+# Install Node.js dependencies
 cd ~/.claude/plugins/computer
 npm install --omit=dev
 ```
 
-### 3. Ensure Ollama is running with models
+### 3. Pull AI Models
 
 ```bash
-ollama serve &
+# Required: embedding model for knowledge base (~274MB, fast)
 ollama pull nomic-embed-text
+
+# Recommended: voice conversation model (~30GB download)
 ollama pull llama4:scout
+
+# Recommended: tool routing model (~16GB download)
 ollama pull hf.co/Salesforce/Llama-xLAM-2-8b-fc-r-gguf:F16
 ```
 
-### 4. (Recommended) Set up Moshi speech-to-speech
+> These are large downloads. Start them and let them run. The server will work without the voice models — you'll just get an error when you try to use voice commands.
+
+### 4. Set Up Moshi Voice (Recommended)
+
+Moshi is the heart of the voice experience. Skip this if you only want typed commands.
 
 ```bash
 cd ~/.claude/plugins/computer
+
+# Create a Python virtual environment for Moshi
 python3.12 -m venv moshi-env
+
+# Install Moshi MLX (Apple Silicon optimized)
 source moshi-env/bin/activate
-pip install moshi_mlx
+pip install moshi_mlx huggingface_hub
+
+# Optional: pre-download the model (~5GB, saves time on first voice session)
+python -c "from huggingface_hub import snapshot_download; snapshot_download('kyutai/moshika-mlx-q4')"
 ```
 
-First run will download the Moshi model (~5GB). You can test standalone:
+The LCARS server will auto-start Moshi on launch. To test Moshi standalone:
 
 ```bash
-source moshi-env/bin/activate
+source ~/.claude/plugins/computer/moshi-env/bin/activate
 python -m moshi_mlx.local_web -q 4 --hf-repo kyutai/moshika-mlx-q4
-# Opens on http://localhost:8998
+# Opens on http://localhost:8998 — try the built-in Moshi web UI
 ```
 
-The LCARS server manages Moshi as a sidecar process automatically — no need to start it manually.
+> **Browser requirement for voice:** Moshi requires WebCodecs API (Opus encode/decode). Use **Chrome or Edge** — Safari does not support WebCodecs yet.
 
-### 5. Register as a Claude Code plugin
+### 5. Register as a Claude Code Plugin
+
+Claude Code discovers plugins through a marketplace directory. Here's how to set it up:
 
 ```bash
+# Create the marketplace directory structure
 mkdir -p ~/.claude/plugins/computer-marketplace/.claude-plugin/plugins
+
+# Link the computer plugin into the marketplace
+ln -s ~/.claude/plugins/computer \
+  ~/.claude/plugins/computer-marketplace/.claude-plugin/plugins/computer
 ```
 
-Create `~/.claude/plugins/computer-marketplace/.claude-plugin/marketplace.json`:
+Create the marketplace manifest at `~/.claude/plugins/computer-marketplace/.claude-plugin/marketplace.json`:
 
 ```json
 {
@@ -297,7 +402,7 @@ Create `~/.claude/plugins/computer-marketplace/.claude-plugin/marketplace.json`:
   "plugins": [
     {
       "name": "computer",
-      "description": "Star Trek Enterprise-style AI computer with LCARS interface",
+      "description": "USS Enterprise AI computer with LCARS interface",
       "version": "3.0.0",
       "author": { "name": "Your Name" },
       "source": "../../../computer",
@@ -307,568 +412,338 @@ Create `~/.claude/plugins/computer-marketplace/.claude-plugin/marketplace.json`:
 }
 ```
 
-Symlink and install:
+Register and install:
 
 ```bash
-ln -s ~/.claude/plugins/computer ~/.claude/plugins/computer-marketplace/.claude-plugin/plugins/computer
-claude plugin marketplace add computer-local --source directory --path ~/.claude/plugins/computer-marketplace
+# Add the local marketplace
+claude plugin marketplace add computer-local \
+  --source directory \
+  --path ~/.claude/plugins/computer-marketplace
+
+# Install the plugin from the marketplace
 claude plugin install computer@computer-local
+
+# Verify installation
+claude plugin list
 ```
 
-### 6. Verify installation
+The plugin includes a **SessionStart hook** that auto-starts the server every time you open Claude Code. Open [http://localhost:3141](http://localhost:3141) in Chrome to access the LCARS UI.
 
-Start a new Claude Code session. The SessionStart hook auto-starts the server. Open [http://localhost:3141](http://localhost:3141) in your browser.
+### 6. Set Up Gmail (Optional)
+
+Gmail integration uses OAuth — your credentials stay on your machine.
+
+**Step 1: Create Google OAuth credentials**
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Create a new project (or use an existing one)
+3. Enable the **Gmail API** in the API Library
+4. Go to **Credentials** → **Create Credentials** → **OAuth 2.0 Client ID**
+5. Application type: **Web application**
+6. Authorized redirect URIs: `http://localhost:3141/api/gateway/oauth/gmail/callback`
+7. Download the JSON credentials file
+
+**Step 2: Place credentials**
+```bash
+# Copy your downloaded credentials file
+cp ~/Downloads/client_secret_*.json ~/.claude/plugins/computer/data/google-oauth.json
+```
+
+**Step 3: Authorize Gmail**
+Start the server, then open the LCARS UI and go to the **Channels** panel. Click **Authorize Gmail**. This opens a browser OAuth flow — log in and grant access. Done.
+
+Or via API:
+```bash
+TOKEN=$(cat ~/.claude/plugins/computer/data/.auth-token)
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://localhost:3141/api/gateway/oauth/gmail/start
+```
+
+### 7. Start and Verify
+
+```bash
+# Start the server manually (auto-starts with Claude Code via SessionStart hook)
+~/.claude/plugins/computer/scripts/start.sh
+
+# Check server health
+TOKEN=$(cat ~/.claude/plugins/computer/data/.auth-token)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/health | python3 -m json.tool
+
+# Run the regression test suite (requires server + Moshi running)
+node ~/.claude/plugins/computer/tests/voice-regression.mjs
+```
+
+Expected health response when everything is working:
+```json
+{
+  "status": "online",
+  "ollama": "online",
+  "vectordb": "online",
+  "moshi": { "running": true, "ready": true, "pid": 12345 },
+  "gmail": { "connected": true, "email": "you@gmail.com" }
+}
+```
+
+Open **Chrome** and navigate to [http://localhost:3141](http://localhost:3141). You should see the LCARS interface. Click the diamond button ◆ in the title bar to activate voice.
 
 ---
 
-## Usage
+## Voice Interaction Guide
 
-### Slash Commands
+> **Browser requirement:** Voice features require Chrome or Edge. WebCodecs API (Opus encode/decode) is not yet available in Safari.
 
-All commands are namespaced under `computer:` when invoked from Claude Code.
+### Moshi Mode — Natural Conversation
 
-| Command | Purpose |
-|---------|---------|
-| `/computer:computer` | Launch/stop the LCARS server |
-| `/computer:analyze <text-or-file>` | Sentiment, topics, entities, action items |
-| `/computer:search <query>` | Web search with synthesis |
-| `/computer:transcribe <audio-file>` | Whisper audio transcription |
-| `/computer:status` | System diagnostics + Moshi/Ollama/Gmail status |
-| `/computer:compare <items>` | Side-by-side comparison of files/text |
-| `/computer:summarize <text>` | Multi-level document summarization |
-| `/computer:monitor <target>` | Set up watches on URLs/files/processes |
-| `/computer:log <entry>` | Captain's log entries |
-| `/computer:brief` | Activity briefing and status report |
-| `/computer:pipeline <operations>` | Chain operations |
-| `/computer:know <query-or-fact>` | Store, retrieve, or search knowledge base |
-| `/computer:export [format] [timeframe]` | Generate formatted reports |
-| `/computer:channels` | List messaging channels with status |
-| `/computer:send <channel> <target> <message>` | Send message (Gmail supported) |
-| `/computer:gateway` | Local service status, sessions, agents, models |
-| `/computer:audit` | Security audit |
+Moshi is the default voice mode. It provides full-duplex speech-to-speech conversation with ~200ms latency.
 
-### Web UI Panels
+1. Open [http://localhost:3141](http://localhost:3141) in Chrome
+2. Confirm the title bar shows **MOSHI** (not CMD) — this is the mode indicator
+3. Click the **diamond button ◆** — it turns cyan and pulses
+4. **Start speaking naturally.** Moshi will respond with voice and text simultaneously
+5. You can interrupt Moshi by speaking — it's truly full-duplex
+6. The status bar shows Moshi's live transcript as it speaks
 
-The LCARS interface has 19 panels organized in three groups:
+**To issue a tool command from Moshi mode:**
+Say **"Computer, [your command]"** — for example:
+- "Computer, what time is it?"
+- "Computer, check my email"
+- "Computer, show me a chart of gold prices this week"
 
-#### Core
-| Panel | Purpose |
-|-------|---------|
-| **Dashboard** | Bridge console — system stats, Moshi status, Ollama status, Gmail, security |
-| **Main** | Chat input, streaming Claude responses, command history |
-| **Transcript** | Mic toggle, file upload, timestamped transcript entries |
-| **Analysis** | Collapsible raw input, sentiment bar, topic tags, entities, action items |
-| **Charts** | Chart.js renders with LCARS colors, smart chart generation |
-| **Knowledge** | Vector search with method selection, metadata filters, tabbed views |
+The system detects "Computer" in Moshi's transcript, switches to Computer mode, runs the command, speaks the result, then returns to natural Moshi conversation.
 
-#### Comms
-| Panel | Purpose |
-|-------|---------|
-| **Channels** | Gmail compose, inbox, threads, OAuth |
-| **Search** | Web search results with clickable links |
-| **Log** | Captain's log with stardates, categories, color-coded tags |
-| **Monitor** | Active monitors with status dots, check history |
-| **Compare** | Side-by-side comparison with similarity bars, diff grids |
+**To stop:** Click the diamond button again. Moshi disconnects.
 
-#### Ops
-| Panel | Purpose |
-|-------|---------|
-| **Gateway** | Tabbed: Overview / Sessions / Agents / Models (all local) |
-| **Plugins** | Tabbed: Plugins / Hooks / Tools registry |
-| **Cron** | Job grid with schedule display, event log |
-| **Browser** | URL bar + viewport |
-| **Nodes** | Local device info with camera/screen capture |
-| **Security** | Shield gauge, redaction stats, audit findings |
+### Computer Mode — Tool Commands
 
-### Voice Interaction
+Computer mode uses the full tool pipeline: Silero VAD → Whisper STT → xLAM routing → tool execution → Llama 4 Scout response → Coqui TTS.
 
-#### Moshi Mode (Full-Duplex, Recommended)
-
-1. Open the LCARS UI in your browser
-2. Click the **MOSHI** mode toggle button in the title bar
-3. Click the **diamond button** (&#9670;) — it pulses cyan
-4. **Speak naturally** — Moshi responds in real-time with ~200ms latency
-5. Full-duplex: you can speak while Moshi is talking
-6. Say **"Computer, check my email"** — auto-switches to Computer mode for tools
-7. After the command completes, returns to Moshi mode
-
-#### Computer Mode (Tool-Augmented)
-
-1. Click **CMD** mode toggle (or it auto-selects if Moshi is unavailable)
+1. Click **MOSHI** to toggle to **CMD** mode (or it auto-selects if Moshi is unavailable)
 2. Click the diamond button — it pulses amber
-3. Say **"Computer, what is the system status?"** — button turns red (thinking)
-4. The Computer speaks the response — button turns green (speaking)
-5. Returns to amber (listening) for the next command
+3. Say **"Computer, [your command]"**
+4. Watch the button states:
+   - **Amber pulse** = listening for speech
+   - **Bright amber** = speech captured, sending to server
+   - **Red pulse** = thinking (running models)
+   - **Green pulse** = speaking (TTS playing)
+5. After the response, it returns to amber (listening)
+6. You can say "Computer" again immediately for the next command
 
-**Voice command flow:**
-```
-Moshi Mode:  [Mic → Opus encode] → [WebSocket] → [LCARS bridge] → [Moshi MLX]
-             → [Audio + text response] → [Opus decode → playback]
-             → [Wake word "Computer" detected → switch to Computer mode]
+### Voice Command Reference
 
-Computer Mode: [Silero VAD] → [Whisper STT] → [wake word check]
-               → [xLAM tool routing] → [tool execution] → [Llama 4 Scout response]
-               → [Coqui TTS] → [audio playback] → [return to listening/Moshi]
-```
+| Say... | What Happens |
+|--------|-------------|
+| `Computer, what time is it?` | Returns time, date, and stardate |
+| `Computer, search for [topic]` | DuckDuckGo search + page fetching, results in Search panel |
+| `Computer, what is the gold price?` | Live spot price from Swissquote |
+| `Computer, show me Tesla stock this week` | Live price + simulated trend chart |
+| `Computer, chart Amazon vs Microsoft` | Comparison line chart |
+| `Computer, check my email` | Inbox overview in Channels panel |
+| `Computer, summarize my inbox` | AI-generated inbox summary |
+| `Computer, reply to John saying I'll be there` | Finds the email, opens compose |
+| `Computer, send an email to user@example.com` | Opens compose with recipient |
+| `Computer, remember [fact]` | Stores in vector knowledge base |
+| `Computer, what do we know about [topic]` | Semantic search of knowledge base |
+| `Computer, analyze [text]` | Sentiment, topics, entities, action items |
+| `Computer, log [note]` | Captain's log entry with stardate |
+| `Computer, red alert` | UI flashes red, visual/audio alert |
+| `Computer, yellow alert` | UI flashes yellow |
+| `Computer, stand down` | Returns to normal operations |
+| `Computer, show me the charts panel` | Switches active panel |
+| `Computer, remind me in 30 minutes to check the build` | Sets a timed reminder |
+| `Computer, monitor https://example.com` | Sets up a URL monitor |
+| `Computer, open https://example.com` | Opens URL in Browser panel |
+| `Computer, what is my system status?` | Returns health/connectivity summary |
+| `Computer, show me the dashboard` | Switches to Dashboard panel |
 
-### Smart Voice Routing
+---
 
-| Voice Pattern | Action |
-|--------------|--------|
-| "Computer, analyze [text]" | AI analysis with sentiment, topics, entities |
-| "Computer, search [query]" | Web search with results pushed to UI |
-| "Computer, check my email" | Gmail inbox summary |
-| "Computer, reply to [name]'s email" | Compose and send reply |
-| "Computer, show me [chart]" | Smart chart generation |
-| "Computer, what time is it?" | Stardate + local time |
-| "Computer, set a reminder" | Timer with notification |
-| "Computer, red alert" | Visual + audio alert |
-| "Computer, remember [fact]" | Store in knowledge base |
-| "Computer, show me [panel]" | Switch to named panel |
+## The 19 LCARS Panels
+
+The interface is organized into three groups accessible from the sidebar.
+
+### Core Group
+
+| Panel | Purpose |
+|-------|---------|
+| **Dashboard** | Bridge overview: Moshi status, Ollama models, Gmail, security score, system uptime |
+| **Main** | Text chat with Claude via SSE streaming, command history |
+| **Transcript** | Live speech-to-text display, file upload, timestamped entries |
+| **Analysis** | AI analysis results: sentiment bars, topic tags, entity list, action items |
+| **Charts** | Chart.js visualizations with LCARS orange/lavender color theme, data tables |
+| **Knowledge** | Vector search UI: query input, method selector, result cards with scores |
+
+### Comms Group
+
+| Panel | Purpose |
+|-------|---------|
+| **Channels** | Gmail: inbox list, full thread view, compose window, OAuth authorization |
+| **Search** | Web search results with clickable links, DuckDuckGo source |
+| **Log** | Captain's log entries with stardates, categories (personal/mission/technical) |
+| **Monitor** | Active URL/file monitors, check history with status dots |
+| **Compare** | Side-by-side text comparison with similarity score and diff visualization |
+
+### Ops Group
+
+| Panel | Purpose |
+|-------|---------|
+| **Gateway** | Local service registry: sessions, agent definitions, Ollama model catalog |
+| **Plugins** | Tool/hook/plugin registry — what the computer knows how to do |
+| **Cron** | Scheduled job grid with next-run times and execution event log |
+| **Browser** | URL bar + embedded viewport for browsing within LCARS |
+| **Nodes** | Local machine as "node 0": hardware info, camera/screen capture |
+| **Security** | Shield gauge, secret redaction statistics, security audit log |
 
 ---
 
 ## API Reference
 
+### Authentication
+
+All `/api/*` routes require a Bearer token. The token is auto-generated on first server start and saved to `data/.auth-token`.
+
+```bash
+TOKEN=$(cat ~/.claude/plugins/computer/data/.auth-token)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/health
+```
+
+WebSocket connections authenticate via a query parameter (not a header):
+```javascript
+const ws = new WebSocket(`ws://localhost:3141?token=${token}`);
+```
+
 ### REST Endpoints
 
-#### Health Check
+#### System
 
 ```
-GET /api/health
+GET  /api/health                    System status (no auth required)
+GET  /api/voice/status              Voice service + Moshi info
+GET  /api/voice/config              VAD settings + mode descriptions
+GET  /api/voice/moshi/status        Moshi process health (auth required)
+POST /api/voice/moshi/start         Start Moshi sidecar
+POST /api/voice/moshi/stop          Stop Moshi sidecar
 ```
 
-Response:
-```json
-{
-  "status": "online",
-  "system": "USS Enterprise Computer",
-  "uptime": 1234.56,
-  "vectordb": "online",
-  "ollama": "online",
-  "gateway": { "enabled": true, "running": true, "connected": true, "mode": "local" },
-  "moshi": { "running": true, "ready": true, "pid": 12345, "port": 8998 },
-  "gmail": { "connected": true, "email": "user@gmail.com" },
-  "config": { "mode": "local" }
-}
-```
-
-#### Data Endpoints
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET/POST | /api/transcripts | Transcripts |
-| GET/POST | /api/analyses | Analyses |
-| POST | /api/charts | Chart.js visualizations |
-| POST | /api/search-results | Search results |
-| GET/POST | /api/logs | Captain's log entries |
-| GET/POST | /api/monitors | Monitor status tracking |
-| GET/POST | /api/comparisons | Side-by-side comparisons |
-
-#### Voice
+#### Knowledge Base
 
 ```
-GET  /api/voice/status         # Voice status + Moshi info
-GET  /api/voice/config         # VAD config + mode descriptions
-GET  /api/voice/moshi/status   # Moshi process health
-POST /api/voice/moshi/start    # Start Moshi sidecar
-POST /api/voice/moshi/stop     # Stop Moshi sidecar
+GET    /api/knowledge               List all stored knowledge entries
+POST   /api/knowledge               Store a new fact or document
+POST   /api/knowledge/search        Semantic/keyword/hybrid search
+DELETE /api/knowledge/:id           Delete an entry
+GET    /api/knowledge/stats         Embedding count, storage size
 ```
 
-#### TTS / STT
-
-```
-POST /api/tts/speak            # Generate speech via Coqui TTS
-GET  /api/tts/audio/:file      # Serve generated WAV file
-GET  /api/tts/providers        # List TTS providers
-POST /api/transcribe/file      # Transcribe audio via Whisper
-GET  /api/transcribe/providers # List STT providers
-```
-
-#### Media Analysis
-
-```
-POST /api/media/analyze        # Upload image/video for Ollama vision analysis
-POST /api/media/video/frames   # Extract video frames via FFmpeg
-GET  /api/media/providers      # List vision providers
-```
-
-### Knowledge Base API
-
+Example — store a fact:
 ```bash
-# Store a fact
 curl -X POST http://localhost:3141/api/knowledge \
   -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"text":"The Enterprise uses dilithium crystals","source":"user","tags":["engineering"]}'
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "The dilithium crystal chamber operates at 4.7 cochrane units",
+    "title": "Engineering note",
+    "tags": ["engineering", "warp"]
+  }'
+```
 
-# Semantic search
+Example — search:
+```bash
 curl -X POST http://localhost:3141/api/knowledge/search \
   -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"how does warp drive work","method":"hybrid","limit":5}'
-
-# Get statistics
-curl -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/knowledge/stats
+  -H "Content-Type: application/json" \
+  -d '{"query": "warp drive efficiency", "method": "hybrid", "limit": 5}'
 ```
 
-### Gateway API (Local Services)
-
-All gateway endpoints run as self-contained local services (no external gateway required).
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | /api/gateway/status | Local service status |
-| GET | /api/gateway/channels | Connected channels (Gmail) |
-| POST | /api/gateway/send | Send message (Gmail) |
-| GET | /api/gateway/sessions | Voice sessions |
-| GET | /api/gateway/agents | Agent definitions from agents/*.md |
-| GET | /api/gateway/models | Ollama model catalog |
-| GET | /api/gateway/nodes | Local machine info |
-| GET | /api/gateway/plugins | Plugin registry |
-| GET | /api/gateway/cron | Cron job list |
-| GET | /api/gateway/sessions/:key/history | Session conversation history |
-| GET | /api/gateway/sessions/:key/cost | Token usage |
-| POST | /api/gateway/nodes/:id/camera | Capture camera image |
-| POST | /api/gateway/nodes/:id/screen | Capture screenshot |
-| POST | /api/gateway/nodes/:id/execute | Execute whitelisted command |
-
-#### OAuth
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | /api/gateway/oauth/status | Gmail authorization status |
-| POST | /api/gateway/oauth/:provider/start | Start Gmail OAuth flow |
-| POST | /api/gateway/oauth/:provider/revoke | Revoke authorization |
-
-### WebSocket Events
-
-Connect to `ws://localhost:3141?token=<auth-token>`. Binary messages use a 1-byte kind prefix for Moshi audio.
-
-#### Server to Client
-
-| Event | Data |
-|-------|------|
-| `status` | `{ message, connected }` |
-| `stt_result` | `{ text }` — Whisper transcription |
-| `voice_thinking` | `{}` — Processing started |
-| `voice_response` | `{ text, audioUrl, toolsUsed, panelSwitch }` |
-| `voice_done` | `{}` — Turn complete |
-| `voice_error` | `{ error }` |
-| `voice_mode_changed` | `{ mode: 'moshi'\|'computer', reason }` |
-| `moshi_text` | `{ text, fullText }` — Moshi transcript |
-| `moshi_handshake` | `{}` — Moshi bridge connected |
-| `moshi_error` | `{ error }` |
-| `voice_panel_switch` | `{ panel }` |
-| `chart` | `{ chartConfig, sources, table }` |
-| `alert_status` | `{ level, reason }` |
-| Binary `0x01` | Opus audio frame from Moshi |
-
-#### Client to Server
-
-| Event | Data |
-|-------|------|
-| `voice_command` | `{ text }` — Execute command |
-| `voice_mode` | `{ mode: 'moshi'\|'computer' }` — Switch mode |
-| `voice_start` | `{}` — Activate voice |
-| `voice_cancel` | `{}` — Deactivate voice |
-| Binary `0x01` + data | Opus audio frame to Moshi |
-| Binary (WAV/WebM) | Audio chunk for Whisper STT |
-
----
-
-## Moshi Speech-to-Speech
-
-### Dual-Mode Voice Architecture
-
-Computer implements a dual-mode voice system:
-
-**Moshi Mode** (default when available):
-- Full-duplex speech-to-speech via [Moshi](https://github.com/kyutai-labs/moshi) by Kyutai Labs
-- Runs natively on Apple Silicon via MLX with 4-bit quantization (~5GB model)
-- ~200ms response latency — natural conversational flow
-- Audio streamed as Opus frames over WebSocket
-- Moshi handles its own voice activity detection — no Silero VAD needed
-- Text transcript relayed to LCARS UI in real-time
-
-**Computer Mode** (tool commands):
-- Triggered by wake word "Computer" in Moshi's transcript, or by manual toggle
-- Routes through the full tool pipeline: Whisper STT, xLAM tool routing, tool execution, Llama 4 Scout response generation, Coqui TTS
-- Access to 25+ tools: web search, charts, email, knowledge base, alerts, monitors, etc.
-- After command completion, auto-switches back to Moshi mode
-
-### Moshi Protocol
-
-The LCARS server bridges between the browser and Moshi's WebSocket at `ws://localhost:8998/api/chat`:
+#### Voice / TTS / STT
 
 ```
-Browser ←→ LCARS Server (:3141) ←→ Moshi MLX (:8998)
-
-Binary message format (both directions):
-  [1 byte kind] [payload...]
-  0x00 = Handshake (Moshi → server, empty payload)
-  0x01 = Opus audio frame (bidirectional)
-  0x02 = UTF-8 text token (Moshi → server)
-
-Audio: Opus-encoded, 24kHz, mono, ~80ms frames
+POST /api/tts/speak                 Synthesize text → WAV file
+GET  /api/tts/audio/:filename       Serve a generated audio file
+POST /api/transcribe/file           Transcribe audio via Whisper
 ```
 
-### Wake Word Switching
-
-When Moshi is active and its text output contains "Computer, ..." the server:
-1. Extracts the command text after "Computer"
-2. Switches the client to Computer mode
-3. Processes the command through the full tool pipeline
-4. Sends the response (with TTS audio)
-5. Switches back to Moshi mode
-
-### Moshi API
-
+Example — generate speech:
 ```bash
-# Check Moshi status
-curl -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/voice/moshi/status
-# → {"running":true,"ready":true,"pid":12345,"port":8998}
-
-# Start Moshi (if not auto-started)
-curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/voice/moshi/start
-
-# Stop Moshi
-curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/voice/moshi/stop
+curl -X POST http://localhost:3141/api/tts/speak \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Computer online. All systems nominal."}' \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['audioUrl'])"
 ```
 
----
-
-## Gmail Integration
-
-Gmail is integrated directly via OAuth (no gateway required):
-
-```bash
-# Authorize Gmail (opens OAuth flow)
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  http://localhost:3141/api/gateway/oauth/gmail/start
-
-# Check inbox
-curl -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/gmail/inbox?max=10
-
-# Send email
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  http://localhost:3141/api/gmail/send \
-  -d '{"to":"user@example.com","subject":"Hello","body":"From the Enterprise Computer"}'
-```
-
-Voice commands:
-- "Computer, check my email"
-- "Computer, summarize my inbox"
-- "Computer, reply to John's email saying I'll be there at 3"
-- "Computer, send an email to user@example.com about the meeting"
-
----
-
-## Server Components
-
-### Middleware
-
-| File | Purpose |
-|------|---------|
-| `server/middleware/auth.js` | Bearer token authentication — auto-generated 256-bit token stored in `data/.auth-token` |
-| `server/middleware/security.js` | Inbound secret scanning + outbound response redaction |
-
-### Routes
-
-| File | Purpose |
-|------|---------|
-| `server/routes/api.js` | CRUD for transcripts, analyses, sessions, logs, monitors, comparisons |
-| `server/routes/knowledge.js` | Knowledge base: ingest, search, bulk, stats, delete |
-| `server/routes/claude.js` | Claude CLI proxy with SSE streaming |
-| `server/routes/transcribe.js` | Audio transcription via local Whisper |
-| `server/routes/tts.js` | Text-to-speech via local Coqui TTS |
-| `server/routes/media.js` | Media upload + analysis via Ollama vision |
-| `server/routes/voice.js` | Voice config/status + Moshi control endpoints |
-| `server/routes/gateway-extras.js` | Sessions, agents, hooks, tools, nodes, OAuth, inbox, channels |
-
-### Services
-
-| File | Purpose |
-|------|---------|
-| `server/services/moshi.js` | Moshi MLX sidecar: process lifecycle + WebSocket bridge |
-| `server/services/voice-assistant.js` | Dual-model voice: xLAM routing + Scout responses, 25+ tools |
-| `server/services/websocket.js` | WebSocket manager: dual-mode audio routing, tool executor, smart charts, web search |
-| `server/services/config.js` | JSON config management (data/config.json) |
-| `server/services/models.js` | Ollama model listing with capability detection |
-| `server/services/sessions.js` | Voice session tracking |
-| `server/services/agents.js` | Agent definitions from agents/*.md with YAML frontmatter |
-| `server/services/vision.js` | Image/video analysis via Ollama vision models |
-| `server/services/node-local.js` | Local machine as node 0 (camera, screen, whitelisted commands) |
-| `server/services/cron-scheduler.js` | Local cron with data/cron.json storage |
-| `server/services/plugins.js` | Static tool/hook/plugin registry (26 tools, 4 hooks, 2 plugins) |
-| `server/services/gmail.js` | Gmail API: OAuth, inbox, send, threads, labels, follow-ups |
-| `server/services/vectordb.js` | LanceDB connection management |
-| `server/services/embeddings.js` | Ollama nomic-embed-text wrapper |
-| `server/services/chunking.js` | 6 chunking strategies |
-| `server/services/search.js` | 6 search methods (vector, BM25, hybrid, MMR, RRF) |
-| `server/services/storage.js` | JSON file persistence |
-| `server/services/transcription.js` | Whisper CLI wrapper |
-| `server/services/tts.js` | Coqui TTS with sequential queue |
-| `server/services/claude-bridge.js` | LLM bridge via Ollama |
-| `server/services/notifications.js` | macOS desktop notifications |
-
----
-
-## UI Components
-
-### JavaScript Modules
-
-All UI code is vanilla JavaScript ES modules — no build step required.
-
-#### Services
-
-| File | Purpose |
-|------|---------|
-| `api-client.js` | REST client with auth token |
-| `websocket-client.js` | WebSocket with auto-reconnect, binary Moshi frame handling |
-| `speech-service.js` | MediaRecorder audio capture |
-| `audio-player.js` | TTS queue playback + Moshi Opus streaming via WebCodecs AudioDecoder |
-| `vad-service.js` | Silero VAD (Computer mode) + continuous Opus capture via WebCodecs AudioEncoder (Moshi mode) |
-
-#### Voice Assistant
-
-| File | Purpose |
-|------|---------|
-| `voice-assistant-ui.js` | Dual-mode state machine: IDLE, LISTENING, CAPTURING, PROCESSING, THINKING, SPEAKING, MOSHI_ACTIVE. Mode toggle, wake word detection, Moshi transcript display |
-
-### CSS Design System
-
-#### LCARS Color Palette
-
-| Variable | Hex | Usage |
-|----------|-----|-------|
-| `--lcars-orange` | `#FF9900` | Primary text, borders |
-| `--lcars-peach` | `#FF9966` | Secondary elements |
-| `--lcars-lavender` | `#CC99CC` | Headers, labels |
-| `--lcars-blue` | `#9999FF` | Tertiary accents |
-| `--lcars-light-blue` | `#99CCFF` | Data text, links |
-| `--lcars-gold` | `#FFCC00` | Highlights, warnings |
-| `--lcars-red` | `#CC4444` | Errors, alerts |
-| `--lcars-green` | `#55CC55` | Success, online |
-| Cyan | `#33CCFF` | Moshi active state |
-
----
-
-## Plugin Components
-
-### Commands (17)
-
-| File | Invoke As | Purpose |
-|------|-----------|---------|
-| `computer.md` | `/computer:computer` | Start/stop LCARS server |
-| `analyze.md` | `/computer:analyze` | AI text analysis |
-| `search.md` | `/computer:search` | Web search |
-| `transcribe.md` | `/computer:transcribe` | Audio transcription |
-| `status.md` | `/computer:status` | System diagnostics |
-| `compare.md` | `/computer:compare` | Side-by-side comparison |
-| `summarize.md` | `/computer:summarize` | Document summarization |
-| `monitor.md` | `/computer:monitor` | Set up watches |
-| `log.md` | `/computer:log` | Captain's log |
-| `brief.md` | `/computer:brief` | Activity briefing |
-| `pipeline.md` | `/computer:pipeline` | Chain operations |
-| `know.md` | `/computer:know` | Knowledge base |
-| `export.md` | `/computer:export` | Generate reports |
-| `channels.md` | `/computer:channels` | List channels |
-| `send.md` | `/computer:send` | Send messages |
-| `gateway.md` | `/computer:gateway` | Service management |
-| `audit.md` | `/computer:audit` | Security audit |
-
-### Agents (15)
-
-Agents are defined as Markdown files in `agents/` with optional YAML frontmatter (name, description, model).
-
-| File | Model | Purpose |
-|------|-------|---------|
-| `analyst.md` | Opus | Sentiment, topics, action items, summaries |
-| `researcher.md` | Sonnet | Web research, source evaluation |
-| `visualizer.md` | Sonnet | Chart.js config generation |
-| `transcription-processor.md` | Sonnet | Transcript cleanup, speaker detection |
-| `comparator.md` | Opus | Side-by-side comparison |
-| `summarizer.md` | Opus | Multi-level summarization |
-| `monitor.md` | Sonnet | URL/file/process monitoring |
-| `translator.md` | Sonnet | Multi-language translation |
-| `explainer.md` | Opus | Layered explanations |
-| `pipeline.md` | Opus | Workflow orchestration |
-| `knowledge.md` | Opus | Knowledge store/retrieve |
-| `channels.md` | Sonnet | Messaging + compose |
-| `automation.md` | Opus | Cron + pipeline orchestration |
-| `browser-agent.md` | Sonnet | Web automation |
-| `security-agent.md` | Sonnet | Security audits |
-
-### Hooks
-
-**SessionStart hook:** Runs `scripts/status.sh` to auto-start the server on session begin.
-
----
-
-## Vector Knowledge Base
-
-### Chunking Strategies
-
-| Strategy | Description | Best For |
-|----------|-------------|----------|
-| `fixed` | N-character chunks with overlap | Uniform sizes |
-| `sentence` | Split on sentence boundaries | Short facts |
-| `paragraph` | Split on double newlines (default) | Medium documents |
-| `sliding` | Fixed window with step size | Overlapping context |
-| `semantic` | Split when cosine similarity drops | Topic shifts |
-| `recursive` | Headers, paragraphs, sentences | Long documents |
-
-### Search Methods
-
-| Method | Description | Use Case |
-|--------|-------------|----------|
-| `vector` | Cosine similarity | Semantic search |
-| `keyword` | BM25-style TF-IDF | Exact terms |
-| `hybrid` | Vector + keyword (default) | General purpose |
-| `mmr` | Maximal Marginal Relevance | Avoid redundancy |
-| `multi_query` | Query variations + RRF | Complex queries |
-
----
-
-## Security
-
-A multi-layer security system:
-
-- **Bearer token auth** — Auto-generated 256-bit token on all `/api/*` routes
-- **Helmet** — CSP, X-Frame-Options, and other security headers
-- **CORS** — Same-origin only (localhost:3141)
-- **Rate limiting** — 200 req/min general, 20 req/min on sensitive endpoints
-- **Inbound scanning** — POST/PUT/PATCH bodies scanned for tokens, keys, passwords
-- **Outbound redaction** — All JSON responses scanned for leaked secrets
-- **Command whitelist** — Node execute endpoint only allows whitelisted commands (ls, df, uptime, etc.)
-- **WebSocket auth** — Token required as query parameter on WebSocket connections
-- **Agent hardening** — All 15 agent system prompts include security directive
+#### Data (CRUD)
 
 ```
-GET /api/security/stats  # Redaction audit data
+GET/POST   /api/transcripts         Speech-to-text transcript entries
+GET/POST   /api/analyses            Analysis results
+GET/POST   /api/logs                Captain's log entries
+GET/POST   /api/monitors            URL/file monitors
+GET/POST   /api/comparisons         Comparison results
 ```
 
----
-
-## Data Storage
+#### Gmail
 
 ```
-data/
-├── vectordb/              # LanceDB vector database
-├── transcripts/           # One JSON file per transcript
-├── analyses/              # Analysis results
-├── sessions/              # Session data
-├── logs/                  # Captain's log entries
-├── monitors/              # Monitor configs
-├── comparisons/           # Comparison results
-├── config.json            # Local service config
-├── cron.json              # Cron job definitions
-├── agents-config.json     # Agent overrides
-├── .auth-token            # Server auth token (gitignored)
-└── gmail-*.json           # Gmail OAuth tokens (gitignored)
+GET  /api/gmail/inbox               Recent inbox messages
+GET  /api/gmail/search              Search emails (query string ?q=)
+GET  /api/gmail/messages/:id        Read full message
+POST /api/gmail/send                Send an email
+GET  /api/gmail/summary             AI inbox summary
+GET  /api/gmail/followups           Follow-up detection
 ```
+
+#### Gateway (Local Services)
+
+```
+GET  /api/gateway/status            Local service registry status
+GET  /api/gateway/channels          Connected channels (Gmail, etc.)
+GET  /api/gateway/agents            Agent definitions from agents/*.md
+GET  /api/gateway/models            Ollama model catalog
+GET  /api/gateway/sessions          Active voice sessions
+GET  /api/gateway/plugins           Tool/hook/plugin registry
+GET  /api/gateway/cron              Cron job definitions
+POST /api/gateway/nodes/0/camera    Capture from camera
+POST /api/gateway/nodes/0/screen    Capture screenshot
+POST /api/gateway/oauth/gmail/start Start Gmail OAuth flow
+```
+
+### WebSocket Protocol
+
+Connect: `ws://localhost:3141?token=<your-auth-token>`
+
+Binary messages use a 1-byte kind prefix (Moshi protocol):
+- `0x00` = Handshake (Moshi → LCARS server → browser)
+- `0x01` = Opus audio frame (bidirectional)
+- `0x02` = UTF-8 text token (Moshi → LCARS server → browser)
+
+#### Events the Server Sends to Browser
+
+| Event | Payload | Meaning |
+|-------|---------|---------|
+| `status` | `{message, connected}` | Server status / welcome |
+| `stt_result` | `{text}` | Whisper transcription complete |
+| `voice_thinking` | `{}` | LLM processing started |
+| `voice_response` | `{text, audioUrl, toolsUsed, panelSwitch}` | Command result + audio |
+| `voice_done` | `{}` | Turn fully complete |
+| `voice_error` | `{error}` | Something went wrong |
+| `voice_mode_changed` | `{mode, reason}` | Switched between Moshi/Computer |
+| `moshi_text` | `{text, fullText}` | Live Moshi transcript token |
+| `moshi_handshake` | config object | Moshi bridge connected |
+| `moshi_error` | `{error}` | Moshi problem |
+| `voice_panel_switch` | `{panel}` | Auto-switch to this panel |
+| `chart` | `{chartConfig, sources, table}` | Push chart data to UI |
+| `alert_status` | `{level, reason}` | Red/yellow/blue/normal alert |
+| Binary `0x01…` | Opus frame bytes | Moshi audio (play immediately) |
+
+#### Events the Browser Sends to Server
+
+| Event | Payload | Meaning |
+|-------|---------|---------|
+| `voice_command` | `{text}` | Run this text as a voice command |
+| `voice_mode` | `{mode}` | Switch to 'moshi' or 'computer' |
+| `voice_start` | `{}` | Activate voice (triggers Moshi connect) |
+| `voice_cancel` | `{}` | Deactivate voice |
+| Binary `0x01…` | Opus frame bytes | Your microphone audio to Moshi |
+| Binary WAV/WebM | audio bytes | Audio chunk for Whisper STT |
 
 ---
 
@@ -876,71 +751,146 @@ data/
 
 ### Environment Variables
 
+Set these before starting the server, or in your shell profile:
+
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `COMPUTER_PORT` | `3141` | Server port |
-| `VOICE_MODEL` | `llama4:scout` | Ollama model for conversation |
+| `COMPUTER_PORT` | `3141` | Server HTTP + WebSocket port |
+| `VOICE_MODEL` | `llama4:scout` | Ollama model for conversation responses |
 | `ACTION_MODEL` | `hf.co/Salesforce/Llama-xLAM-2-8b-fc-r-gguf:F16` | Ollama model for tool routing |
-| `VISION_MODEL` | `llama4:scout` | Ollama model for vision analysis |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama API base |
-| `MOSHI_PORT` | `8998` | Moshi sidecar port |
-| `WHISPER_PATH` | `/opt/homebrew/bin/whisper` | Whisper binary path |
-| `TTS_PATH` | `/opt/homebrew/bin/tts` | Coqui TTS binary path |
+| `VISION_MODEL` | `llama4:scout` | Ollama model for image analysis |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
+| `MOSHI_PORT` | `8998` | Moshi sidecar WebSocket port |
+| `WHISPER_PATH` | `whisper` (in PATH) | Path to Whisper CLI binary |
+| `TTS_PATH` | `tts` (in PATH) | Path to Coqui TTS binary |
+| `MOSHI_VENV` | `./moshi-env` | Path to Python venv for Moshi |
+
+### Runtime Config
+
+The server reads and writes `data/config.json` at runtime. Access it via the API:
+
+```bash
+GET  /api/config       # Read current config
+POST /api/config       # Update a config key
+```
+
+Key config fields:
+- `vad.positiveSpeechThreshold` — VAD sensitivity (default 0.8, higher = less sensitive)
+- `vad.redemptionFrames` — Frames before VAD decides speech ended (default 15)
+- `tts.provider` — TTS engine selection
+- `stt.provider` — STT engine selection
+
+---
+
+## Running Tests
+
+A full regression test suite covers the entire voice pipeline:
+
+```bash
+# Make sure the server is running first
+~/.claude/plugins/computer/scripts/start.sh
+
+# Run all 33 tests (~45 seconds, most of that is LLM warm-up)
+node ~/.claude/plugins/computer/tests/voice-regression.mjs
+
+# Or via the shell script
+~/.claude/plugins/computer/scripts/run-tests.sh
+```
+
+What the tests cover:
+- Server health (Ollama, VectorDB, gateway)
+- Moshi process + WebSocket reachability
+- TTS endpoint generates real audio
+- Full WebSocket flow: `voice_start` → `voice_mode_changed:moshi` → `moshi_handshake`
+- Full LLM round-trip: `voice_command` → xLAM → tool execution → Scout response → TTS
+- Wake word detection logic (9 cases, unit test, no mic needed)
+- VAD WASM libs served with correct MIME types
+- Static code regression checks for all four bug fixes:
+  - Log spam fix (Ollama polling)
+  - Dual-audio fix (Moshi audio gate)
+  - Wake word loop fix (Computer mode guard)
+  - THINKING pause fix (mic stops during processing)
 
 ---
 
 ## Troubleshooting
 
-### Server won't start
+### Server won't start / port in use
 
 ```bash
-lsof -i :3141                       # Check if port is in use
-cat /tmp/lcars-server.log           # Check server log
-lsof -i :3141 -t | xargs kill -9   # Kill and restart
+# Find what's on port 3141
+lsof -i :3141
+
+# Kill it
+lsof -i :3141 -t | xargs kill -9
+
+# Check logs
+cat ~/.claude/plugins/computer/data/server.log | tail -50
+
+# Start manually with visible output
 cd ~/.claude/plugins/computer && node server/index.js
 ```
 
-### Moshi not starting
+### Moshi not connecting
 
 ```bash
-# Check if venv exists
+# Check if Moshi Python venv exists
 ls ~/.claude/plugins/computer/moshi-env/bin/python
+
+# Check if Moshi is running
+curl http://localhost:8998
+
+# Check its status via the API
+TOKEN=$(cat ~/.claude/plugins/computer/data/.auth-token)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/voice/moshi/status
 
 # Test Moshi standalone
 source ~/.claude/plugins/computer/moshi-env/bin/activate
 python -m moshi_mlx.local_web -q 4 --hf-repo kyutai/moshika-mlx-q4
 
-# Check port conflict
-lsof -i :8998
+# If using wrong Python version
+python3.12 -m venv ~/.claude/plugins/computer/moshi-env
+source ~/.claude/plugins/computer/moshi-env/bin/activate
+pip install moshi_mlx
+```
 
-# Start via API
+### Voice button does nothing / "WebCodecs not available"
+
+WebCodecs (required for Opus encode/decode) is Chrome/Edge only. Safari does not support it.
+
+```
+✓ Use Chrome or Edge
+✗ Do not use Safari
+```
+
+If in Chrome and still failing, check the browser console (F12) for errors. Common causes:
+- Microphone permission denied → click the lock icon in the URL bar and allow microphone
+- Server not running → check http://localhost:3141/api/health
+
+### Ollama not available / voice commands fail
+
+```bash
+# Check Ollama is running
+curl http://localhost:11434/api/tags
+
+# If not running
+ollama serve &
+
+# Check models are installed
+ollama list | grep -E "llama4|xLAM|nomic"
+
+# Pull missing models
+ollama pull llama4:scout
+ollama pull hf.co/Salesforce/Llama-xLAM-2-8b-fc-r-gguf:F16
+ollama pull nomic-embed-text
+```
+
+### Gmail auth failing
+
+```bash
 TOKEN=$(cat ~/.claude/plugins/computer/data/.auth-token)
-curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/voice/moshi/start
-```
 
-### Ollama not available
-
-```bash
-ollama serve
-ollama list                          # Check installed models
-curl http://localhost:11434/api/tags # Verify API
-```
-
-### Voice not working
-
-```bash
-# Check voice status
-TOKEN=$(cat ~/.claude/plugins/computer/data/.auth-token)
-curl -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/voice/status
-
-# Verify both models are available
-ollama list | grep -E "llama4|xLAM"
-```
-
-### Gmail OAuth issues
-
-```bash
-# Check Gmail status
+# Check current auth status
 curl -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/gateway/oauth/status
 
 # Re-authorize
@@ -948,114 +898,221 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
   http://localhost:3141/api/gateway/oauth/gmail/start
 ```
 
+If OAuth fails, make sure:
+1. `data/google-oauth.json` exists with your client credentials
+2. `http://localhost:3141/api/gateway/oauth/gmail/callback` is in your Google Cloud authorized redirect URIs
+
+### Knowledge base errors
+
+```bash
+TOKEN=$(cat ~/.claude/plugins/computer/data/.auth-token)
+
+# Check VectorDB stats
+curl -H "Authorization: Bearer $TOKEN" http://localhost:3141/api/knowledge/stats
+
+# Verify nomic-embed-text is installed
+ollama pull nomic-embed-text
+```
+
 ---
 
-## File Structure
+## Security Model
+
+The system is designed for **single-user local use** with these protections:
+
+| Layer | What It Does |
+|-------|-------------|
+| **Bearer token auth** | Auto-generated 256-bit random token on first start, required on all `/api/*` routes |
+| **WebSocket token** | Same token required as `?token=` query parameter on WebSocket upgrade |
+| **Helmet headers** | Content-Security-Policy, X-Frame-Options, HSTS, X-Content-Type-Options |
+| **CORS** | localhost-only, blocks cross-origin requests |
+| **Rate limiting** | 200 requests/minute general; 20/minute on sensitive endpoints |
+| **Inbound scanning** | POST/PUT bodies scanned for API keys, tokens, passwords — logs and rejects |
+| **Outbound redaction** | All JSON responses scanned for leaked secrets before sending to browser |
+| **Command whitelist** | Node execute endpoint only allows: `ls`, `df`, `uptime`, `whoami`, `pwd`, `date`, `ps`, `top` |
+| **Secret storage** | `.auth-token` and OAuth files in `data/` — gitignored, 0600 permissions |
+
+The auth token lives at `data/.auth-token` and is automatically used by:
+- The browser UI (injected into `index.html` at serve time)
+- The Claude Code slash commands
+- The regression test suite
+
+---
+
+## Project Structure
 
 ```
 ~/.claude/plugins/computer/
+│
+├── README.md                          This document
+├── package.json                       npm dependencies
+├── .gitignore                         Excludes data/, moshi-env/, node_modules/
+│
 ├── .claude-plugin/
-│   └── plugin.json
-├── package.json
-├── README.md
-├── .gitignore
+│   └── plugin.json                    Claude Code plugin manifest
 │
-├── commands/                          # 17 slash commands
-│   ├── computer.md, analyze.md, search.md, transcribe.md
-│   ├── status.md, compare.md, summarize.md, monitor.md
-│   ├── log.md, brief.md, pipeline.md, know.md, export.md
-│   └── channels.md, send.md, gateway.md, audit.md
+├── hooks/
+│   └── hooks.json                     SessionStart: auto-starts server on Claude Code launch
 │
-├── agents/                            # 15 AI agents (Markdown + YAML frontmatter)
-│   ├── analyst.md, researcher.md, visualizer.md
-│   ├── transcription-processor.md, comparator.md, summarizer.md
-│   ├── monitor.md, translator.md, explainer.md
-│   ├── pipeline.md, knowledge.md
-│   └── channels.md, automation.md, browser-agent.md, security-agent.md
+├── commands/                          17 slash commands (/computer:*)
+│   ├── computer.md                    Launch/stop LCARS server
+│   ├── analyze.md                     AI text analysis
+│   ├── search.md                      Web search
+│   ├── transcribe.md                  Audio transcription
+│   ├── status.md                      System diagnostics
+│   ├── compare.md                     Side-by-side comparison
+│   ├── summarize.md                   Document summarization
+│   ├── monitor.md                     URL/file monitoring
+│   ├── log.md                         Captain's log
+│   ├── brief.md                       Activity briefing
+│   ├── pipeline.md                    Chain operations
+│   ├── know.md                        Knowledge base
+│   ├── export.md                      Generate reports
+│   ├── channels.md                    List messaging channels
+│   ├── send.md                        Send messages
+│   ├── gateway.md                     Service management
+│   └── audit.md                       Security audit
 │
-├── skills/computer-operations/
-│   └── SKILL.md
+├── agents/                            15 Claude-based agents
+│   ├── analyst.md                     Sentiment, topics, action items
+│   ├── researcher.md                  Web research + source evaluation
+│   ├── visualizer.md                  Chart.js config generation
+│   ├── transcription-processor.md     Transcript cleanup + speaker detection
+│   ├── comparator.md                  Side-by-side comparison
+│   ├── summarizer.md                  Multi-level summarization
+│   ├── monitor.md                     URL/file/process monitoring
+│   ├── translator.md                  Multi-language translation
+│   ├── explainer.md                   Layered pedagogical explanations
+│   ├── pipeline.md                    Workflow orchestration
+│   ├── knowledge.md                   Knowledge store/retrieve
+│   ├── channels.md                    Messaging + compose
+│   ├── automation.md                  Cron + pipeline orchestration
+│   ├── browser-agent.md               Web automation
+│   └── security-agent.md              Security audits
 │
-├── hooks/hooks.json                   # SessionStart auto-start
+├── skills/
+│   └── computer-operations/           Operational knowledge for the plugin
+│       └── SKILL.md
 │
 ├── scripts/
-│   ├── start.sh, status.sh
-│   ├── start-moshi.sh                # Moshi sidecar launcher
-│   ├── build-check.js, setup-vad-libs.js
+│   ├── start.sh                       Start the Express server (idempotent)
+│   ├── start-moshi.sh                 Start Moshi sidecar standalone
+│   ├── status.sh                      Check server + Moshi status
+│   ├── run-tests.sh                   Run voice regression tests
+│   ├── build-check.js                 Verify prerequisites before start
+│   └── setup-vad-libs.js              Download + place ONNX/VAD WASM files
 │
-├── moshi-env/                         # Python 3.12 venv for Moshi MLX (gitignored)
+├── tests/
+│   └── voice-regression.mjs           33-test regression suite (voice pipeline)
 │
 ├── server/
-│   ├── index.js                       # Express + WS + Moshi lifecycle
+│   ├── index.js                       Server entry point: Express + WS + Moshi lifecycle
+│   │
 │   ├── middleware/
-│   │   ├── auth.js                   # Bearer token auth
-│   │   └── security.js               # Secret scanning + redaction
+│   │   ├── auth.js                    Bearer token auth + token file management
+│   │   └── security.js                Secret scanning (inbound) + redaction (outbound)
+│   │
 │   ├── routes/
-│   │   ├── api.js                    # CRUD endpoints
-│   │   ├── knowledge.js              # Vector knowledge base
-│   │   ├── claude.js                 # Claude CLI proxy (SSE)
-│   │   ├── transcribe.js            # Whisper STT
-│   │   ├── tts.js                   # Coqui TTS
-│   │   ├── media.js                 # Ollama vision analysis
-│   │   ├── voice.js                 # Voice config + Moshi control
-│   │   └── gateway-extras.js        # Sessions, agents, OAuth, inbox, nodes
-│   ├── services/
-│   │   ├── moshi.js                 # Moshi sidecar + WS bridge
-│   │   ├── voice-assistant.js       # Dual-model (xLAM + Scout) + 25+ tools
-│   │   ├── websocket.js             # Dual-mode audio routing + tool executor
-│   │   ├── config.js                # JSON config management
-│   │   ├── models.js                # Ollama model catalog
-│   │   ├── sessions.js              # Voice session tracking
-│   │   ├── agents.js                # Agent definitions (YAML frontmatter)
-│   │   ├── vision.js                # Ollama vision analysis
-│   │   ├── node-local.js            # Local machine node
-│   │   ├── cron-scheduler.js        # Local cron scheduler
-│   │   ├── plugins.js               # Tool/hook/plugin registry
-│   │   ├── gmail.js                 # Gmail OAuth + API
-│   │   ├── vectordb.js              # LanceDB
-│   │   ├── embeddings.js            # Ollama embeddings
-│   │   ├── chunking.js, search.js   # Knowledge base internals
-│   │   ├── storage.js               # JSON file persistence
-│   │   ├── transcription.js         # Whisper CLI
-│   │   ├── tts.js                   # Coqui TTS queue
-│   │   ├── claude-bridge.js         # Ollama LLM bridge
-│   │   └── notifications.js         # macOS notifications
-│   └── utils/
-│       ├── helpers.js
-│       └── sanitize.js
+│   │   ├── api.js                     CRUD: transcripts, analyses, logs, monitors, comparisons
+│   │   ├── knowledge.js               Knowledge base: ingest, search, bulk, stats
+│   │   ├── claude.js                  Claude CLI proxy with SSE streaming
+│   │   ├── transcribe.js              Whisper CLI wrapper endpoint
+│   │   ├── tts.js                     Coqui TTS endpoint → WAV file
+│   │   ├── media.js                   Ollama vision: image/video analysis
+│   │   ├── voice.js                   Voice status + Moshi control endpoints
+│   │   └── gateway-extras.js          Sessions, agents, nodes, OAuth, Gmail, channels
+│   │
+│   └── services/
+│       ├── moshi.js                   Moshi sidecar: spawn/stop + WebSocket bridge
+│       ├── voice-assistant.js         Dual-model pipeline: xLAM routing + Scout responses
+│       ├── websocket.js               WebSocket handler: mode routing, tool executor, charts
+│       ├── config.js                  JSON config read/write (data/config.json)
+│       ├── models.js                  Ollama model catalog + capability detection
+│       ├── sessions.js                Voice session history tracking
+│       ├── agents.js                  Agent definitions from YAML frontmatter in agents/*.md
+│       ├── vision.js                  Ollama vision analysis (base64 image → structured JSON)
+│       ├── node-local.js              Local machine node: camera, screen, whitelisted commands
+│       ├── cron-scheduler.js          Cron with minute granularity, persistent in data/cron.json
+│       ├── plugins.js                 Static tool/hook/plugin registry (26 tools, 4 hooks)
+│       ├── gmail.js                   Gmail API: OAuth, inbox, send, threads, AI summaries
+│       ├── vectordb.js                LanceDB connection pool
+│       ├── embeddings.js              Ollama nomic-embed-text wrapper
+│       ├── chunking.js                6 chunking strategies for knowledge ingestion
+│       ├── search.js                  6 search methods (vector, BM25, hybrid, MMR, RRF)
+│       ├── storage.js                 JSON file persistence (read/write/list/delete)
+│       ├── transcription.js           Whisper CLI invocation + WAV prep
+│       ├── tts.js                     Coqui TTS queue with WAV output
+│       ├── claude-bridge.js           Ollama LLM bridge (chat completions)
+│       └── notifications.js           macOS desktop notifications via osascript
 │
 ├── ui/
-│   ├── index.html                     # SPA with 19 LCARS panels
+│   ├── index.html                     SPA shell: auth token injection, 19 panel HTML
+│   │
 │   ├── css/
-│   │   ├── lcars.css                  # LCARS design system
-│   │   └── components.css            # Panel styles + Moshi states
+│   │   ├── lcars.css                  LCARS design system: typography, layout, color vars
+│   │   └── components.css             Panel styles, voice button states, Moshi animations
+│   │
 │   └── js/
-│       ├── app.js                     # Bootstrap + WS routing
-│       ├── components/               # 19 panel components
-│       │   ├── dashboard-panel.js, command-input.js
-│       │   ├── transcript-panel.js, analysis-panel.js
-│       │   ├── chart-panel.js, knowledge-panel.js
-│       │   ├── channels-panel.js, search-panel.js
-│       │   ├── log-panel.js, monitor-panel.js, comparison-panel.js
-│       │   ├── gateway-panel.js, plugins-panel.js
-│       │   ├── cron-panel.js, browser-panel.js
-│       │   ├── nodes-panel.js, security-panel.js
-│       │   ├── voice-input.js, voice-assistant-ui.js
-│       │   └── status-bar.js
+│       ├── app.js                     Bootstrap: WebSocket connect, panel registration, routing
+│       │
+│       ├── components/                19 panel components (each self-contained)
+│       │   ├── dashboard-panel.js     Bridge overview: Moshi, Ollama, Gmail, security
+│       │   ├── command-input.js       Text chat input with SSE streaming
+│       │   ├── transcript-panel.js    STT history + mic toggle + file upload
+│       │   ├── analysis-panel.js      Sentiment bars, topic tags, entities, action items
+│       │   ├── chart-panel.js         Chart.js v4 with LCARS theming + table mode
+│       │   ├── knowledge-panel.js     Vector search UI: query, method, results
+│       │   ├── channels-panel.js      Gmail: inbox, thread view, compose, OAuth
+│       │   ├── search-panel.js        Web search results with clickable links
+│       │   ├── log-panel.js           Captain's log with stardates + category tags
+│       │   ├── monitor-panel.js       Active monitors, check history, status dots
+│       │   ├── comparison-panel.js    Side-by-side diff with similarity score
+│       │   ├── gateway-panel.js       Sessions, agents, models (local service registry)
+│       │   ├── plugins-panel.js       Tool/hook/plugin registry display
+│       │   ├── cron-panel.js          Cron job grid + execution event log
+│       │   ├── browser-panel.js       URL bar + embedded viewport
+│       │   ├── nodes-panel.js         Local machine info + camera/screen capture
+│       │   ├── security-panel.js      Shield gauge + redaction statistics
+│       │   ├── voice-input.js         Microphone controls (MediaRecorder)
+│       │   ├── voice-assistant-ui.js  Voice state machine: IDLE/LISTENING/MOSHI_ACTIVE/...
+│       │   └── status-bar.js          Bottom bar: activity text + system indicators
+│       │
 │       ├── services/
-│       │   ├── api-client.js          # REST client
-│       │   ├── websocket-client.js    # WS + binary Moshi frames
-│       │   ├── speech-service.js      # MediaRecorder capture
-│       │   ├── audio-player.js        # TTS queue + Opus streaming
-│       │   └── vad-service.js         # Silero VAD + Opus capture
+│       │   ├── api-client.js          HTTP client with auth token injection
+│       │   ├── websocket-client.js    WS client: JSON dispatch + binary Moshi frame routing
+│       │   ├── speech-service.js      MediaRecorder audio capture
+│       │   ├── audio-player.js        TTS queue (HTML5 Audio) + Moshi Opus streaming
+│       │   └── vad-service.js         Silero VAD (Computer mode) + Opus capture (Moshi mode)
+│       │
 │       └── utils/
-│           └── formatters.js, lcars-helpers.js
+│           ├── formatters.js          Date/number/text formatting helpers
+│           └── lcars-helpers.js       LCARS animation and UI helpers
 │
-└── data/                              # Runtime data (gitignored)
+├── lib/ (inside ui/ — VAD libraries)
+│   ├── ort.min.js                     ONNX Runtime (runs Silero VAD model in browser)
+│   ├── vad-bundle.min.js              Silero VAD JavaScript bundle (@ricky0123/vad-web)
+│   ├── vad.worklet.bundle.min.js      VAD Web Audio Worklet (runs in audio thread)
+│   ├── silero_vad.onnx                Pre-trained voice activity detection model (1.7MB)
+│   ├── ort-wasm-simd-threaded.wasm    ONNX WASM with SIMD + threading (10MB)
+│   └── ort-wasm-simd-threaded.mjs     WASM loader module
+│
+└── data/                              Runtime data — gitignored
+    ├── .auth-token                    Auto-generated 256-bit auth token
+    ├── config.json                    Runtime configuration
+    ├── server.log                     Server output log
+    ├── vectordb/                      LanceDB database files
+    ├── transcripts/                   One JSON per transcript session
+    ├── analyses/                      Saved analysis results
+    ├── logs/                          Captain's log entries
+    ├── monitors/                      Monitor definitions + history
+    ├── comparisons/                   Comparison results
+    ├── cron.json                      Cron job definitions
+    ├── google-oauth.json              Google OAuth credentials (add this yourself)
+    └── oauth-tokens/                  Gmail access/refresh tokens
 ```
 
 ---
 
 ## License
 
-MIT
+MIT — use it, fork it, build your own starship.

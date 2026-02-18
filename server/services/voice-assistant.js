@@ -1,11 +1,29 @@
 /**
  * Voice Assistant Service — Dual-Model Architecture
  *
- * Uses two local Ollama models:
- * - xLAM 8B F16 (Salesforce Large Action Model): deterministic tool selection/routing
- * - Llama 4 Scout (Meta MoE 16x17B): conversational response generation + analysis
+ * Uses two local Ollama models in a pipeline:
  *
- * Flow: user input → xLAM picks tools → execute tools → Scout generates response
+ * 1. xLAM 8B F16 (Salesforce Large Action Model):
+ *    A model specifically fine-tuned for function/tool selection. Given the user's
+ *    command, it outputs a list of tool calls in OpenAI's tool_calls format.
+ *    This model is deterministic and fast — it routes without hallucinating.
+ *
+ * 2. Llama 4 Scout (Meta 17B MoE "Maverick" variant via Ollama):
+ *    A large mixture-of-experts model used for conversational response generation.
+ *    After tools execute, Scout synthesizes the results into a spoken response
+ *    that sounds natural when read aloud by the TTS system.
+ *
+ * Processing pipeline per voice command:
+ *   1. Auto-search: if the query needs current data (prices, weather, news),
+ *      proactively fetch web results and inject them into the prompt as facts.
+ *   2. xLAM routing: ask xLAM which tools to call for this command.
+ *   3. Safety nets: correct xLAM's tool selection for known failure modes
+ *      (email keywords, visualization keywords).
+ *   4. Tool execution: run each selected tool via the tool executor (internal APIs).
+ *   5. Shortcut responses: for predictable tool results (time, alerts, charts, email),
+ *      bypass Scout and construct the spoken response directly to avoid hallucination.
+ *   6. Scout response: for everything else, ask Scout to generate a natural response
+ *      from the tool results, staying under ~200 chars for TTS.
  */
 
 const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';
@@ -23,6 +41,9 @@ function getSystemPrompt() {
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
   const isoDate = now.toISOString().split('T')[0];
 
+  // Inject the current date/time so Scout can resolve relative time phrases
+  // ("last week", "past 3 days") into exact date ranges for web searches and charts.
+  // This is baked into every request so the model always has an accurate "now".
   return `You are the USS Enterprise Computer, an advanced AI system aboard a Federation starship. You have access to ship systems including knowledge base, communications, sensors (monitoring), captain's log, viewscreen (browser/display), and data visualization.
 
 Current stardate reference: Today is ${dateStr}, ${timeStr} (${isoDate}).
@@ -436,7 +457,7 @@ async function callActionModel(userText) {
   const data = await res.json();
   const choice = data.choices?.[0];
 
-  // Format 1: Standard OpenAI tool_calls array (preferred)
+  // Format 1: Standard OpenAI tool_calls array (preferred, most common)
   if (choice?.message?.tool_calls?.length > 0) {
     return choice.message.tool_calls.map(tc => ({
       name: tc.function?.name,
@@ -444,8 +465,11 @@ async function callActionModel(userText) {
     }));
   }
 
-  // Format 2: xLAM sometimes returns tool calls as JSON in content field
-  // e.g. [{"name": "...", "parameters": {...}}] or {"tool_calls": [...]}
+  // Format 2: xLAM sometimes serializes tool calls as JSON in the content field
+  // instead of the tool_calls array — this is a model quirk, not an API bug.
+  // Examples seen in the wild:
+  //   [{"name": "search_knowledge", "parameters": {"query": "..."}}]
+  //   {"tool_calls": [{"name": "get_time", "arguments": {}}]}
   const content = (choice?.message?.content || '').trim();
   if (content.startsWith('[') || content.startsWith('{')) {
     try {
@@ -517,7 +541,12 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   let panelSwitch = null;
   const toolResults = [];
 
-  // Auto-search: detect queries needing current data and pre-fetch
+  // Auto-search: detect queries that need current data not in the model's training.
+  // If these keywords appear, proactively fetch web results and inject the facts
+  // into the prompt BEFORE calling xLAM. This way the model has real data to
+  // work with, rather than relying on possibly-stale parametric knowledge.
+  // The alternative (letting xLAM call web_search_and_read) is slower because
+  // it requires an extra model round-trip first.
   const searchKeywords = ['price', 'cost', 'worth', 'stock', 'quote', 'weather', 'forecast',
     'temperature', 'score', 'result', 'news', 'latest', 'current', 'today', 'right now',
     'how much is', 'spot price', 'market', 'exchange rate', 'rate of', 'bitcoin', 'btc',
@@ -534,7 +563,10 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     try {
       const searchResult = await toolExecutor('web_search_and_read', { query: userText, num_results: 3 });
 
-      // Check for structured price data (from Swissquote or similar APIs)
+      // Fast path: check for structured price data from the Swissquote live feed.
+      // The _webSearchAndRead executor adds a specially formatted line like:
+      //   "Live gold spot price: $2400.50 USD per troy ounce"
+      // We parse this deterministically — no LLM involved — so the price is always accurate.
       if (searchResult.pages?.length) {
         for (const p of searchResult.pages) {
           if (!p.content) continue;
@@ -603,8 +635,9 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     }
   }
 
-  // If we have a direct answer from structured data, skip LLM entirely
-  // BUT NOT if the user wants a visualization — let xLAM route to generate_chart
+  // If we have a direct answer from structured data (e.g. Swissquote price), skip LLM entirely.
+  // Exception: if the user wants a visualization, let the full pipeline run so xLAM
+  // can call generate_chart ("show me gold prices as a chart" shouldn't just speak the price).
   const vizKeywords = ['chart', 'graph', 'plot', 'table', 'visualiz', 'trend', 'show me', 'show the', 'show data', 'display data', 'compare data', 'comparison', 'versus', ' vs '];
   const wantsViz = vizKeywords.some(kw => lowerText.includes(kw));
   if (directAnswer && !wantsViz) {
@@ -625,7 +658,10 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     console.warn(`[voice-ai] [xLAM] Routing failed, falling back to no tools: ${err.message}`);
   }
 
-  // xLAM safety net: email tool routing — if user mentions email/inbox/mail keywords, force the right email tool
+  // xLAM safety net #1: email tool routing.
+  // xLAM sometimes fails to select the correct email tool or selects none at all.
+  // If the user's request contains email-related keywords but xLAM didn't pick
+  // an email tool, we override and force the appropriate one based on intent signals.
   const emailKeywords = ['email', 'inbox', 'mail', 'gmail', 'follow-up', 'followup', 'unread'];
   const wantsEmail = emailKeywords.some(kw => lowerText.includes(kw));
   const allEmailTools = ['check_email', 'summarize_inbox', 'check_followups', 'read_email', 'send_email', 'reply_email'];
@@ -653,8 +689,10 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     actionToolCalls = [{ name: emailTool, arguments: emailArgs }];
   }
 
-  // xLAM safety net: if it didn't route to generate_chart but user clearly wants visualization, force it
-  // (skip if email tools already selected — "show me my email" is not a chart request)
+  // xLAM safety net #2: chart routing.
+  // xLAM misses visualization requests fairly often. If the user's request contains
+  // chart/graph/plot/table keywords but xLAM didn't select generate_chart, inject it.
+  // Skip this if email tools are already selected (e.g. "show me my inbox" is not a chart).
   const hasChartCall = actionToolCalls.some(tc => tc.name === 'generate_chart');
   if (!hasChartCall && wantsViz && !wantsEmail) {
     console.log(`[voice-ai] [xLAM] Forcing generate_chart — user request contains visualization keyword`);
@@ -716,8 +754,17 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     }
   }
 
-  // Step 3: Generate spoken response
-  // For generate_chart, bypass LLM — use the summary directly to avoid hallucinated numbers
+  // Step 3: Generate the spoken response.
+  //
+  // For many tools, we bypass Scout entirely and construct the response directly.
+  // This is intentional: Scout sometimes fabricates numbers or adds spurious detail
+  // when it has real data in front of it. For predictable tools (time, alerts, charts,
+  // email) we know exactly what the response should say, so we build it ourselves.
+  //
+  // For everything else (knowledge search, web search, complex queries), we pass
+  // the tool results to Scout and let it generate a natural conversational response.
+
+  // generate_chart: use the summary the chart executor returns — exact, no hallucination risk
   const chartResult = toolResults.find(tr => tr.tool === 'generate_chart' && !tr.error);
   if (chartResult && chartResult.result?.summary) {
     const spokenText = `Displaying ${chartResult.result.summary}`;
@@ -1010,6 +1057,7 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
  * Check if voice assistant is available (Ollama reachable with required models).
  */
 let _ollamaAvailable = false;
+let _lastLoggedAvailable = null; // track to suppress repeated log spam
 let _checkPromise = checkOllama(); // start immediately on import
 
 export function isVoiceAvailable() {
@@ -1034,17 +1082,24 @@ async function checkOllama() {
       const hasVoice = models.some(m => m === VOICE_MODEL || m.startsWith(VOICE_MODEL));
       const hasAction = models.some(m => m === ACTION_MODEL || m.startsWith(ACTION_MODEL));
       _ollamaAvailable = hasVoice && hasAction;
-      if (_ollamaAvailable) {
-        console.log(`[voice-ai] Ollama available — voice: ${VOICE_MODEL}, action: ${ACTION_MODEL}`);
-      } else {
-        const missing = [];
-        if (!hasVoice) missing.push(VOICE_MODEL);
-        if (!hasAction) missing.push(ACTION_MODEL);
-        console.warn(`[voice-ai] Ollama online but missing models: ${missing.join(', ')}. Available: ${models.join(', ')}`);
+      // Only log when status changes — suppresses the every-30s spam
+      if (_ollamaAvailable !== _lastLoggedAvailable) {
+        _lastLoggedAvailable = _ollamaAvailable;
+        if (_ollamaAvailable) {
+          console.log(`[voice-ai] Ollama available — voice: ${VOICE_MODEL}, action: ${ACTION_MODEL}`);
+        } else {
+          const missing = [];
+          if (!hasVoice) missing.push(VOICE_MODEL);
+          if (!hasAction) missing.push(ACTION_MODEL);
+          console.warn(`[voice-ai] Ollama online but missing models: ${missing.join(', ')}. Available: ${models.join(', ')}`);
+        }
       }
     }
   } catch {
-    console.warn('[voice-ai] Ollama not reachable');
+    if (_lastLoggedAvailable !== false) {
+      _lastLoggedAvailable = false;
+      console.warn('[voice-ai] Ollama not reachable');
+    }
     _ollamaAvailable = false;
   }
 }
@@ -1052,7 +1107,10 @@ async function checkOllama() {
 // Re-check Ollama availability every 30 seconds
 setInterval(() => checkOllama(), 30000);
 
-// Keep models warm in VRAM — send keep_alive every 10 minutes
+// Keep both Ollama models warm in GPU VRAM by sending no-op requests every 10 minutes.
+// Without this, Ollama evicts models from VRAM after 5 minutes of inactivity.
+// Eviction means the next voice command has a 5-30s cold-start delay while the model
+// is loaded back. Keeping them warm ensures sub-second inference start times.
 async function keepModelsWarm() {
   try {
     await fetch(`${OLLAMA_BASE}/api/generate`, {
