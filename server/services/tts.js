@@ -1,52 +1,110 @@
-import { spawn } from 'child_process';
+/**
+ * TTS Service — Kokoro-based text-to-speech via kokoro-js (local ONNX).
+ *
+ * Uses the Kokoro 82M model running locally through ONNX Runtime.
+ * The model is loaded once on server startup and kept warm in memory.
+ *
+ * Voice: configurable via KOKORO_VOICE env var (default: af_heart)
+ * Model: onnx-community/Kokoro-82M-v1.0-ONNX (q8 quantized, ~92MB)
+ */
+
 import fs from 'fs/promises';
 import path from 'path';
-import { generateId } from '../utils/helpers.js';
-
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
-const TTS_PATH = process.env.TTS_PATH || '/opt/homebrew/bin/tts';
-const TTS_MODEL = 'tts_models/en/ljspeech/vits';
 const TTS_OUTPUT_DIR = path.join(PLUGIN_ROOT, 'data', 'tts-cache');
+const DEFAULT_VOICE = process.env.KOKORO_VOICE || 'af_heart';
 
-// Ensure output directory exists
 await fs.mkdir(TTS_OUTPUT_DIR, { recursive: true });
 
-// Sequential queue — only one TTS process at a time (CPU-heavy)
+// Lazy-loaded KokoroTTS instance — loaded on first use to avoid blocking server startup
+let ttsInstance = null;
+let ttsLoading = false;
+let ttsError = null;
+
+async function getTTS() {
+  if (ttsInstance) return ttsInstance;
+  if (ttsLoading) {
+    // Wait for in-progress load
+    while (ttsLoading) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (ttsInstance) return ttsInstance;
+    throw new Error(ttsError || 'TTS failed to load');
+  }
+
+  ttsLoading = true;
+  try {
+    const { KokoroTTS } = await import('kokoro-js');
+    console.log('[tts] Loading Kokoro model (first use — downloading if needed)...');
+    ttsInstance = await KokoroTTS.from_pretrained(
+      'onnx-community/Kokoro-82M-v1.0-ONNX',
+      { dtype: 'q8', device: 'cpu' },
+    );
+    console.log('[tts] Kokoro model loaded');
+    return ttsInstance;
+  } catch (err) {
+    ttsError = err.message;
+    console.error('[tts] Failed to load Kokoro:', err.message);
+    throw err;
+  } finally {
+    ttsLoading = false;
+  }
+}
+
+// Sequential queue — only one TTS generation at a time (CPU-heavy)
 let ttsQueue = Promise.resolve();
 
-export function generateSpeech(text) {
-  const promise = ttsQueue.then(() => _generate(text));
+/**
+ * Generate speech from text using Kokoro TTS.
+ *
+ * @param {string} text - Text to synthesize
+ * @param {string} voice - Kokoro voice ID (default: af_heart)
+ * @returns {Promise<{id: string, path: string, filename: string}>}
+ */
+export function generateSpeech(text, voice = DEFAULT_VOICE) {
+  const promise = ttsQueue.then(() => _generate(text, voice));
   ttsQueue = promise.catch(() => {});
   return promise;
 }
 
-async function _generate(text) {
-  const id = generateId();
-  const outPath = path.join(TTS_OUTPUT_DIR, `${id}.wav`);
+let idCounter = 0;
 
-  const args = [
-    '--model_name', TTS_MODEL,
-    '--text', text,
-    '--out_path', outPath,
+async function _generate(text, voice) {
+  const tts = await getTTS();
+  const id = `kokoro-${Date.now()}-${++idCounter}`;
+  const filename = `${id}.wav`;
+  const outPath = path.join(TTS_OUTPUT_DIR, filename);
+
+  const audio = await tts.generate(text, { voice, speed: 1.0 });
+  await audio.save(outPath);
+
+  return { id, path: outPath, filename };
+}
+
+/**
+ * List available Kokoro voices.
+ */
+export function getVoices() {
+  return [
+    { id: 'af_heart', name: 'Heart (American Female)', accent: 'american' },
+    { id: 'af_bella', name: 'Bella (American Female)', accent: 'american' },
+    { id: 'af_nova', name: 'Nova (American Female)', accent: 'american' },
+    { id: 'af_sarah', name: 'Sarah (American Female)', accent: 'american' },
+    { id: 'af_sky', name: 'Sky (American Female)', accent: 'american' },
+    { id: 'af_nicole', name: 'Nicole (American Female)', accent: 'american' },
+    { id: 'am_adam', name: 'Adam (American Male)', accent: 'american' },
+    { id: 'am_michael', name: 'Michael (American Male)', accent: 'american' },
+    { id: 'am_echo', name: 'Echo (American Male)', accent: 'american' },
+    { id: 'am_eric', name: 'Eric (American Male)', accent: 'american' },
+    { id: 'am_liam', name: 'Liam (American Male)', accent: 'american' },
+    { id: 'bf_emma', name: 'Emma (British Female)', accent: 'british' },
+    { id: 'bf_isabella', name: 'Isabella (British Female)', accent: 'british' },
+    { id: 'bm_daniel', name: 'Daniel (British Male)', accent: 'british' },
+    { id: 'bm_george', name: 'George (British Male)', accent: 'british' },
   ];
-
-  return new Promise((resolve, reject) => {
-    const proc = spawn(TTS_PATH, args);
-    let stderr = '';
-    proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolve({ id, path: outPath, filename: `${id}.wav` });
-      } else {
-        reject(new Error('TTS synthesis failed'));
-      }
-    });
-    proc.on('error', reject);
-  });
 }
 
 // Cleanup files older than 5 minutes

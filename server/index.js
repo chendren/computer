@@ -21,7 +21,8 @@
  *   4. Express middleware stack
  *   5. API routes mounted under /api/
  *   6. WebSocket server (voice pipeline)
- *   7. Moshi MLX sidecar (optional, if installed)
+ *   7. Voxtral STT sidecar (local speech-to-text on port 8997)
+ *   8. Moshi MLX sidecar (optional, if installed)
  *   8. Gmail OAuth (optional, if configured)
  *   9. HTTP server listen on PORT
  */
@@ -36,7 +37,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { initStorage } from './services/storage.js';
 import { initVectorDB } from './services/vectordb.js';
-import { initWebSocket, broadcast } from './services/websocket.js';
+import { initWebSocket, broadcast, createGlobalToolExecutor } from './services/websocket.js';
 import apiRoutes from './routes/api.js';
 import knowledgeRoutes from './routes/knowledge.js';
 import transcribeRoutes from './routes/transcribe.js';
@@ -53,11 +54,13 @@ import { initConfig, getConfigSummary } from './services/config.js';
 import { listModels } from './services/models.js';
 import { listSessions } from './services/sessions.js';
 import { initAgents } from './services/agents.js';
-import { initCron, listJobs } from './services/cron-scheduler.js';
+import { initCron, listJobs, addJob, removeJob, toggleJob, setCronToolExecutor } from './services/cron-scheduler.js';
 import { listNodes } from './services/node-local.js';
 import { listPlugins } from './services/plugins.js';
 import * as gmail from './services/gmail.js';
 import { startMoshi, stopMoshi, getMoshiStatus } from './services/moshi.js';
+import { startVoxtralSTT, stopVoxtralSTT, getVoxtralSTTStatus } from './services/voxtral-stt.js';
+import { initMonitorPoller } from './services/monitor-poller.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(__dirname, '..');
@@ -131,7 +134,14 @@ await initAuth(PLUGIN_ROOT);
 await initConfig(PLUGIN_ROOT);
 await initAgents(PLUGIN_ROOT);
 await initCron(PLUGIN_ROOT, broadcast);
+await initMonitorPoller(PLUGIN_ROOT, broadcast);
 console.log('[computer] Local services initialized');
+
+// Start Voxtral STT sidecar (non-fatal, model loads in background)
+startVoxtralSTT(PLUGIN_ROOT).then(ok => {
+  if (ok) console.log('[computer] Voxtral STT ready');
+  else console.log('[computer] Voxtral STT not available (will retry on demand)');
+}).catch(() => {});
 
 // Start Moshi speech-to-speech sidecar (non-fatal)
 startMoshi(PLUGIN_ROOT).then(ok => {
@@ -175,6 +185,7 @@ app.get('/api/health', async (req, res) => {
       mode: 'local',
     },
     gmail: gmailStatus,
+    voxtralStt: getVoxtralSTTStatus(),
     moshi: getMoshiStatus(),
     config: getConfigSummary(),
   };
@@ -250,6 +261,39 @@ app.get('/api/gateway/cron', async (req, res) => {
   }
 });
 
+app.post('/api/gateway/cron', async (req, res) => {
+  const { name, schedule, command, description } = req.body;
+  if (!name || !schedule) {
+    return res.status(400).json({ error: 'name and schedule are required' });
+  }
+  try {
+    const job = await addJob({ name, schedule, command, description });
+    res.json({ ok: true, job });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/gateway/cron/:id', async (req, res) => {
+  try {
+    const removed = await removeJob(req.params.id);
+    if (!removed) return res.status(404).json({ error: 'Job not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/gateway/cron/:id/toggle', async (req, res) => {
+  try {
+    const job = await toggleJob(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    res.json({ ok: true, job });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/gateway/send', sensitiveLimit, async (req, res) => {
   const { channel, target, text, subject, attachments, replyTo, threadId } = req.body;
   if (!channel || !target || !text) {
@@ -292,6 +336,9 @@ const server = createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 initWebSocket(wss, `http://localhost:${PORT}`);
 
+// Wire cron scheduler to the tool executor so job commands actually run
+setCronToolExecutor(createGlobalToolExecutor(`http://localhost:${PORT}`));
+
 // Authenticate WebSocket upgrade requests before completing handshake
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, 'http://localhost');
@@ -322,6 +369,7 @@ server.listen(PORT, () => {
 
 async function shutdown(signal) {
   console.log(`\n[computer] Received ${signal}, shutting down...`);
+  stopVoxtralSTT();
   stopMoshi();
   server.close(() => {
     console.log('[computer] Server closed');

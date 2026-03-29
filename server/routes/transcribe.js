@@ -31,7 +31,7 @@ router.post('/file', upload.single('audio'), async (req, res) => {
     const result = await transcribeFile(req.file.path);
 
     const item = await transcripts.save({
-      source: 'whisper',
+      source: 'voxtral',
       filename: req.file.originalname,
       text: result.text,
       segments: result.segments || [],
@@ -53,7 +53,7 @@ router.post('/file', upload.single('audio'), async (req, res) => {
 
 // List available STT providers
 router.get('/providers', async (req, res) => {
-  res.json({ providers: [{ id: 'whisper', name: 'Whisper (Local)', available: true, source: 'local' }] });
+  res.json({ providers: [{ id: 'voxtral', name: 'Voxtral Mini 3B (Local MLX)', available: true, source: 'local' }] });
 });
 
 export default router;
