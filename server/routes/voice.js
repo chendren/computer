@@ -74,8 +74,8 @@ router.get('/config', (req, res) => {
       preSpeechPadFrames: 10,
     },
     modes: {
-      moshi: { description: 'Full-duplex speech-to-speech via Moshi (~200ms latency)', default: true },
-      computer: { description: 'Tool-augmented voice commands via Voxtral STT → xLAM + Llama Scout → Kokoro TTS' },
+      computer: { description: 'Tool-augmented voice commands via Voxtral STT → xLAM + Llama Scout → Kokoro TTS', default: true },
+      moshi: { description: 'Full-duplex speech-to-speech via Moshi (~200ms latency)' },
       gemini: { description: 'Gemini 3.1 Flash Live — cloud S2S with native tool calling' },
       openai: { description: 'OpenAI Realtime — GPT-4o S2S with semantic VAD and tool calling' },
       nova: { description: 'Nova Sonic — Amazon Bedrock S2S with polyglot voices and tool calling' },

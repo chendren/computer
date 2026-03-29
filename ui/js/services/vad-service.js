@@ -263,10 +263,9 @@ export class VadService {
 
     if (typeof AudioEncoder !== 'undefined') {
       // ScriptProcessorNode bridges the live mic stream to the WebCodecs encoder.
-      // We capture 1920 samples per callback = 80ms at 24kHz = Moshi's frame size.
-      // Note: ScriptProcessorNode is deprecated but still the best cross-browser
-      // option for synchronous PCM access. AudioWorklet would be preferred for new code.
-      const bufferSize = 1920;
+      // createScriptProcessor requires a power-of-two buffer size. Moshi wants
+      // 1920 samples (80ms at 24kHz), so we use 2048 and the encoder handles framing.
+      const bufferSize = 2048;
       this._moshiProcessor = this._moshiCtx.createScriptProcessor(bufferSize, 1, 1);
 
       // WebCodecs AudioEncoder converts raw PCM to Opus frames asynchronously

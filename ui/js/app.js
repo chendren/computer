@@ -26,7 +26,8 @@ import { VoiceAssistantUI } from './components/voice-assistant-ui.js';
 class ComputerApp {
   constructor() {
     const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.ws = new WebSocketClient(`${wsProtocol}//${location.host}`);
+    // Defer WS connection until auth token is fetched (avoids 401 on initial connect)
+    this.ws = new WebSocketClient(`${wsProtocol}//${location.host}`, { autoConnect: false });
     this.api = new ApiClient('/api');
     this.audio = new AudioPlayer();
 
@@ -142,7 +143,7 @@ class ComputerApp {
       btn.addEventListener('click', () => this.switchPanel(btn.dataset.panel));
     });
 
-    // Auth first, then load data
+    // Auth first, then connect WS with token and load data
     this._initAuth(wsProtocol).then(() => this.loadHistory());
   }
 
@@ -153,12 +154,13 @@ class ComputerApp {
       if (data.authToken) {
         this.authToken = data.authToken;
         this.api.setAuthToken(data.authToken);
-        // Reconnect WS with auth token
-        this.ws.setUrl(`${wsProtocol}//${location.host}?token=${data.authToken}`);
+        this.ws.url = `${wsProtocol}//${location.host}?token=${data.authToken}`;
       }
     } catch {
-      // Health endpoint unreachable — will retry on reconnect
+      // Health endpoint unreachable — connect without auth, will retry
     }
+    // Connect WS (with or without token)
+    this.ws.connect();
   }
 
   async _speak(text) {

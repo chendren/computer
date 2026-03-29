@@ -100,7 +100,7 @@ export class VoiceAssistantUI {
     this.vad = new VadService(); // Silero VAD + Opus streaming + Gemini PCM
     this.geminiAudio = new GeminiAudio(); // Gemini PCM playback
     this.state = STATES.IDLE;
-    this.voiceMode = 'moshi'; // Start in Moshi mode — falls back to Computer if Moshi is unavailable
+    this.voiceMode = 'computer'; // Default: Voxtral STT → xLAM routing → Kokoro TTS
     this.moshiTranscript = ''; // Accumulates Moshi text tokens for display
     this.geminiTranscript = ''; // Accumulates Gemini text tokens for display
     this.openaiTranscript = ''; // Accumulates OpenAI Realtime text tokens
@@ -143,7 +143,7 @@ export class VoiceAssistantUI {
   _createModeToggle() {
     this.modeButton = document.createElement('button');
     this.modeButton.className = 'voice-mode-toggle';
-    this.modeButton.title = 'Voice Mode: Moshi (full-duplex)';
+    this.modeButton.title = 'Voice Mode: Computer (Voxtral STT → Kokoro TTS)';
     this.modeButton.textContent = 'MOSHI';
     this.modeButton.setAttribute('data-mode', 'moshi');
     this.modeButton.addEventListener('click', () => this._toggleMode());
@@ -159,9 +159,9 @@ export class VoiceAssistantUI {
    * The server responds with 'voice_mode_changed' confirming the new mode.
    */
   _toggleMode() {
-    // 5-way cycle: MOSHI → CMD → GEMINI → OPENAI → NOVA → MOSHI
-    const cycle = { moshi: 'computer', computer: 'gemini', gemini: 'openai', openai: 'nova', nova: 'moshi' };
-    const newMode = cycle[this.voiceMode] || 'moshi';
+    // 4-way cycle: CMD → GEMINI → OPENAI → NOVA → CMD
+    const cycle = { computer: 'gemini', gemini: 'openai', openai: 'nova', nova: 'computer' };
+    const newMode = cycle[this.voiceMode] || 'computer';
     this._wsSend('voice_mode', { mode: newMode });
   }
 
@@ -175,10 +175,7 @@ export class VoiceAssistantUI {
     this.voiceMode = mode;
     this.vad.setMode(mode);  // tells VAD which pipeline to use
     this.modeButton.setAttribute('data-mode', mode);
-    if (mode === 'moshi') {
-      this.modeButton.textContent = 'MOSHI';
-      this.modeButton.title = 'Voice Mode: Moshi (full-duplex) — click for Computer mode';
-    } else if (mode === 'gemini') {
+    if (mode === 'gemini') {
       this.modeButton.textContent = 'GEMINI';
       this.modeButton.title = 'Voice Mode: Gemini Live (cloud S2S) — click for OpenAI mode';
     } else if (mode === 'openai') {
@@ -186,10 +183,10 @@ export class VoiceAssistantUI {
       this.modeButton.title = 'Voice Mode: OpenAI Realtime (cloud S2S) — click for Nova mode';
     } else if (mode === 'nova') {
       this.modeButton.textContent = 'NOVA';
-      this.modeButton.title = 'Voice Mode: Nova Sonic (AWS S2S) — click for Moshi mode';
+      this.modeButton.title = 'Voice Mode: Nova Sonic (AWS S2S) — click for Computer mode';
     } else {
       this.modeButton.textContent = 'CMD';
-      this.modeButton.title = 'Voice Mode: Computer (commands) — click for Gemini mode';
+      this.modeButton.title = 'Voice Mode: Computer (Voxtral STT → Kokoro TTS) — click for Gemini mode';
     }
     console.log('[VoiceUI] Voice mode:', mode);
   }

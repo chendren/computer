@@ -20,10 +20,10 @@
  *   ws.send('voice_start', {});
  */
 export class WebSocketClient {
-  constructor(url) {
+  constructor(url, { autoConnect = true } = {}) {
     this.url = url;
     this.handlers = {};  // event type → array of handler functions
-    this.connect();
+    if (autoConnect) this.connect();
   }
 
   connect() {
