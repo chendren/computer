@@ -31,8 +31,8 @@ const router = Router();
  *   - moshi: current Moshi sidecar status (running, port, pid)
  */
 router.get('/status', async (req, res) => {
-  const voiceModel = process.env.VOICE_MODEL || 'llama4:scout';
-  const actionModel = process.env.ACTION_MODEL || 'hf.co/Salesforce/Llama-xLAM-2-8b-fc-r-gguf:F16';
+  const voiceModel = process.env.VOICE_MODEL || 'qwen3.5:9b';
+  const actionModel = process.env.ACTION_MODEL || 'llama3-groq-tool-use:8b';
   const moshi = getMoshiStatus();
   res.json({
     available: isVoiceAvailable(),

@@ -27,8 +27,8 @@
  */
 
 const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';
-const VOICE_MODEL = process.env.VOICE_MODEL || 'llama4:scout';
-const ACTION_MODEL = process.env.ACTION_MODEL || 'hf.co/Salesforce/Llama-xLAM-2-8b-fc-r-gguf:F16';
+const VOICE_MODEL = process.env.VOICE_MODEL || 'qwen3.5:9b';
+const ACTION_MODEL = process.env.ACTION_MODEL || 'llama3-groq-tool-use:8b';
 
 // Per-session conversation history
 const sessions = new Map();
