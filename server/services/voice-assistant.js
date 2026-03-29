@@ -97,7 +97,7 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'create_log',
-      description: "Create a log entry. Use when user says 'log', 'captains log', 'captain\\'s log', 'log entry', 'record', or 'make a note'.",
+      description: "Create a formal log entry. Use when user says 'log', 'captains log', 'captain\\'s log', 'log entry', 'record'.",
       parameters: {
         type: 'object',
         properties: {
@@ -613,6 +613,55 @@ export const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'save_note',
+      description: 'Save a quick note. Use when user says "note", "make a note", "remember that", "jot down", "take a note", "note to self".',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'The note content' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_notes',
+      description: 'List recent notes. Use when user says "read my notes", "what notes", "show notes", "my notes", "list notes".',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'play_ambient',
+      description: 'Play or stop ambient background sounds. Use when user says "play ambient", "bridge sounds", "engine room", "engineering ambient", "background sounds", "ambient off", "stop ambient", "space ambient", "deep space sounds".',
+      parameters: {
+        type: 'object',
+        properties: {
+          preset: { type: 'string', enum: ['bridge', 'engineering', 'space', 'stop'], description: 'Sound preset or "stop" to turn off' },
+        },
+        required: ['preset'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'random_fact',
+      description: 'Tell a random interesting fact or piece of trivia. Use when user says "fun fact", "random fact", "tell me something interesting", "trivia", "did you know".',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: { type: 'string', description: 'Topic for the fact (optional — e.g. "space", "history", "science")' },
+        },
+      },
+    },
+  },
 ];
 
 // In-memory reminders (broadcast when due)
@@ -1076,6 +1125,36 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     actionToolCalls.push({ name: 'define_word', arguments: { word: userText } });
   }
 
+  // Safety net #15: save note routing.
+  const noteKw = ['make a note', 'note to self', 'jot down', 'take a note', 'save a note'];
+  if (noteKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'save_note')) {
+    console.log(`[voice-ai] [action] Forcing save_note — user request contains note keyword`);
+    actionToolCalls.push({ name: 'save_note', arguments: { text: userText } });
+  }
+
+  // Safety net #16: list notes routing.
+  const listNoteKw = ['read my notes', 'what notes', 'show notes', 'my notes', 'list notes'];
+  if (listNoteKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'list_notes')) {
+    console.log(`[voice-ai] [action] Forcing list_notes — user request contains list-notes keyword`);
+    actionToolCalls.push({ name: 'list_notes', arguments: {} });
+  }
+
+  // Safety net #17: ambient audio routing.
+  const ambientKw = ['ambient', 'bridge sounds', 'engine room sounds', 'background sounds', 'play ambient', 'stop ambient'];
+  if (ambientKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'play_ambient')) {
+    const isStop = lowerText.includes('stop') || lowerText.includes('off');
+    const presetGuess = lowerText.includes('engineer') ? 'engineering' : lowerText.includes('space') || lowerText.includes('deep space') ? 'space' : 'bridge';
+    console.log(`[voice-ai] [action] Forcing play_ambient — user request contains ambient keyword`);
+    actionToolCalls.push({ name: 'play_ambient', arguments: { preset: isStop ? 'stop' : presetGuess } });
+  }
+
+  // Safety net #18: random fact / trivia routing.
+  const factKw = ['fun fact', 'random fact', 'tell me something interesting', 'trivia', 'did you know'];
+  if (factKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'random_fact')) {
+    console.log(`[voice-ai] [action] Forcing random_fact — user request contains fact/trivia keyword`);
+    actionToolCalls.push({ name: 'random_fact', arguments: {} });
+  }
+
   // Step 2: Execute action model-selected tools
   let loops = 0;
   for (const toolCall of actionToolCalls) {
@@ -1195,6 +1274,17 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     const levelName = a.level === 'normal' ? 'Alert status: normal operations resumed.' : `${a.level} alert activated.`;
     const spokenText = levelName + (a.reason ? ' ' + a.reason + '.' : '');
     console.log(`[voice-ai] [alert-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // For play_ambient, bypass LLM — direct acknowledgment
+  const ambientResult = toolResults.find(tr => tr.tool === 'play_ambient' && !tr.error);
+  if (ambientResult && ambientResult.result) {
+    const r = ambientResult.result;
+    const spokenText = r.action === 'stopped' ? 'Ambient audio stopped.' : `Playing ${r.preset} ambient sounds.`;
+    console.log(`[voice-ai] [ambient-shortcut] Spoken: "${spokenText}"`);
     session.messages.push({ role: 'user', content: enrichedText });
     session.messages.push({ role: 'assistant', content: spokenText });
     return { text: spokenText, toolsUsed, panelSwitch };
@@ -1550,6 +1640,33 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     return { text: spokenText, toolsUsed, panelSwitch: 'compare' };
   }
 
+  // save_note shortcut
+  const noteResult = toolResults.find(tr => tr.tool === 'save_note' && !tr.error);
+  if (noteResult && noteResult.result) {
+    const spokenText = 'Note saved.';
+    console.log(`[voice-ai] [note-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch: 'knowledge' };
+  }
+
+  // list_notes shortcut
+  const listNotesResult = toolResults.find(tr => tr.tool === 'list_notes' && !tr.error);
+  if (listNotesResult && listNotesResult.result) {
+    const notes = listNotesResult.result.notes || [];
+    let spokenText;
+    if (notes.length === 0) {
+      spokenText = 'No notes found.';
+    } else {
+      spokenText = notes.length + ' note' + (notes.length > 1 ? 's' : '') + '. ';
+      spokenText += notes.slice(0, 3).map(n => (n.text || '').slice(0, 50)).join('. ') + '.';
+    }
+    console.log(`[voice-ai] [list-notes-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch: 'knowledge' };
+  }
+
   // For get_news, bypass LLM — speak top headlines directly
   const newsResult = toolResults.find(tr => tr.tool === 'get_news' && !tr.error);
   if (newsResult && newsResult.result?.headlines?.length > 0) {
@@ -1562,6 +1679,16 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     session.messages.push({ role: 'user', content: enrichedText });
     session.messages.push({ role: 'assistant', content: spokenText });
     return { text: spokenText, toolsUsed, panelSwitch: 'search' };
+  }
+
+  // random_fact shortcut — speak the fact directly
+  const factResult = toolResults.find(tr => tr.tool === 'random_fact' && !tr.error);
+  if (factResult && factResult.result?.fact) {
+    const spokenText = factResult.result.fact;
+    console.log(`[voice-ai] [fact-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
   }
 
   // For all other tools, ask the response model to generate a spoken answer.

@@ -1080,6 +1080,28 @@ function createToolExecutor(baseUrl, ws) {
         });
         return await res.json();
       }
+      case 'save_note': {
+        const noteText = input.text || '';
+        const res = await fetch(baseUrl + '/api/knowledge', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ text: noteText, title: 'Note', tags: ['note'], source: 'voice-note' }),
+        });
+        return await res.json();
+      }
+      case 'list_notes': {
+        const res = await fetch(baseUrl + '/api/knowledge/search', {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ query: 'note', limit: 10, method: 'keyword' }),
+        });
+        const data = await res.json();
+        const notes = (data.results || []).filter(r => {
+          const tags = r.tags || [];
+          return tags.includes('note') || (r.source && r.source === 'voice-note');
+        });
+        return { notes: notes.slice(0, 5), count: notes.length };
+      }
       case 'get_time': {
         const now = new Date();
         const year = now.getFullYear();
@@ -1611,6 +1633,31 @@ function createToolExecutor(baseUrl, ws) {
         const defData = await defRes.json();
         const definition = (defData.choices?.[0]?.message?.content || '').trim();
         return { word, definition };
+      }
+      case 'play_ambient': {
+        const preset = input.preset || 'bridge';
+        if (preset === 'stop') {
+          broadcast('ambient_control', { action: 'stop' });
+          return { ok: true, action: 'stopped' };
+        }
+        broadcast('ambient_control', { action: 'play', preset });
+        return { ok: true, preset, action: 'playing' };
+      }
+      case 'random_fact': {
+        const topic = input.topic || '';
+        const prompt = topic
+          ? 'Tell me one fascinating, true fact about ' + topic + '. Keep it under 2 sentences. Be specific with numbers or dates. Do not start with "Did you know".'
+          : 'Tell me one fascinating, true, lesser-known fact. Keep it under 2 sentences. Be specific with numbers or dates. Cover any topic — science, history, nature, space, technology. Do not start with "Did you know".';
+        const factRes = await fetch(OLLAMA_BASE + '/v1/chat/completions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: VOICE_MODEL, stream: false, temperature: 0.8, max_tokens: 100,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        });
+        const factData = await factRes.json();
+        const fact = (factData.choices?.[0]?.message?.content || '').trim();
+        return { fact, topic: topic || 'random' };
       }
       default:
         return { error: `Unknown tool: ${toolName}` };

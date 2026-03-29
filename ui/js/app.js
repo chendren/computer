@@ -22,6 +22,7 @@ import { BrowserPanel } from './components/browser-panel.js';
 import { NodesPanel } from './components/nodes-panel.js';
 import { SecurityPanel } from './components/security-panel.js';
 import { VoiceAssistantUI } from './components/voice-assistant-ui.js';
+import { AmbientAudio } from './services/ambient-audio.js';
 
 class ComputerApp {
   constructor() {
@@ -57,6 +58,9 @@ class ComputerApp {
 
     // Voice assistant (always-listening, wake word "Computer")
     this.voiceAssistant = new VoiceAssistantUI(this.ws, this.audio, this.statusBar);
+
+    // Ambient audio — procedural background sounds
+    this.ambient = new AmbientAudio();
 
     // WebSocket handlers — auto-switch to relevant panel on data push.
     // During voice interaction, only voice_panel_switch controls the active panel
@@ -116,6 +120,12 @@ class ComputerApp {
     // Sound effect cue from server — play through AudioPlayer queue
     this.ws.on('play_sound', (data) => {
       if (data.url) this.audio.speak(data.url);
+    });
+
+    // Ambient audio control — start/stop procedural background sounds
+    this.ws.on('ambient_control', (data) => {
+      if (data.action === 'stop') this.ambient.stop();
+      else if (data.action === 'play') this.ambient.start(data.preset);
     });
 
     // Alert status — visual overlay for red/yellow/blue alert
