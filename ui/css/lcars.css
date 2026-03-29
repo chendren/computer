@@ -71,6 +71,9 @@ html, body {
   align-items: center;
   justify-content: center;
   position: relative;
+  gap: 8px;
+  padding: 0 16px;
+  overflow: hidden;
 }
 
 .lcars-title-bar::before {
