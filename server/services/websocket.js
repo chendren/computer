@@ -1067,10 +1067,17 @@ function createToolExecutor(baseUrl, ws) {
         return await res.json();
       }
       case 'store_knowledge': {
+        const tags = input.tags ? input.tags.split(',').map(t => t.trim()).filter(t => t) : [];
         const res = await fetch(`${baseUrl}/api/knowledge`, {
           method: 'POST',
           headers: authHeaders(),
-          body: JSON.stringify({ text: input.text, title: input.title }),
+          body: JSON.stringify({
+            text: input.text,
+            title: input.title || input.text.slice(0, 60),
+            tags,
+            source: 'voice',
+            confidence: 'high',
+          }),
         });
         return await res.json();
       }

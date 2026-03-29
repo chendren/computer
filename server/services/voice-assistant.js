@@ -48,7 +48,13 @@ Guidelines:
 - If no tool is needed, respond with a brief spoken answer.
 - Never output API keys, tokens, passwords, or sensitive data.
 - Only report numbers that appear verbatim in tool results. NEVER fabricate, estimate, or round data.
-- Do not apologize about technical limitations. Just try alternative approaches silently.`;
+- Do not apologize about technical limitations. Just try alternative approaches silently.
+
+Knowledge Base behavior:
+- The knowledge base contains facts, notes, bookmarks, research findings, and meeting notes stored by the user.
+- When answering questions, check the knowledge base FIRST before searching the web — the user may have already stored the answer.
+- When web search returns valuable data, proactively store key facts in the knowledge base for future retrieval.
+- When the user says "remember", "store", or "save" — always use store_knowledge, not just acknowledge verbally.`;
 }
 
 function getActionSystemPrompt() {
@@ -63,11 +69,11 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'search_knowledge',
-      description: 'Search the ship knowledge base using semantic vector search. Use for questions about stored information, facts, documents.',
+      description: 'Search the ship knowledge base — contains facts, notes, bookmarks, research, meeting notes, and anything the user has stored. Use when user asks "what do we know about", "do you remember", "find", "look up", "recall", "what did I save about", "search knowledge", or references past information. Also use when answering questions that might have been stored previously.',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'Search query' },
+          query: { type: 'string', description: 'Search query — be specific, use key terms' },
           limit: { type: 'number', description: 'Max results (default 5)' },
         },
         required: ['query'],
@@ -78,12 +84,13 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'store_knowledge',
-      description: 'Store new information in the knowledge base for future retrieval.',
+      description: 'Store a fact, piece of information, or research finding in the knowledge base for future retrieval. Use when user says "remember this", "store this", "save this fact", "keep this for later", or when the user provides information worth retaining. Also use proactively when web search returns valuable data the user will likely need again.',
       parameters: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: 'Information to store' },
-          title: { type: 'string', description: 'Title for the entry' },
+          text: { type: 'string', description: 'The information to store — be detailed and specific' },
+          title: { type: 'string', description: 'Short descriptive title for the entry' },
+          tags: { type: 'string', description: 'Comma-separated tags for categorization (e.g. "project,aws,budget")' },
         },
         required: ['text'],
       },
@@ -1255,6 +1262,20 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     actionToolCalls.push({ name: 'send_telegram', arguments: { target: '', text: userText } });
   }
 
+  // Safety net #21: knowledge base search.
+  const kbKw = ['what do we know', 'do you remember', 'what did i save', 'recall', 'search knowledge', 'look up in knowledge'];
+  if (kbKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'search_knowledge')) {
+    console.log(`[voice-ai] [action] Forcing search_knowledge — user request contains KB keyword`);
+    actionToolCalls.push({ name: 'search_knowledge', arguments: { query: userText } });
+  }
+
+  // Safety net #22: store knowledge.
+  const storeKw = ['remember this', 'store this', 'save this fact', 'keep this for later', 'remember that'];
+  if (storeKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'store_knowledge')) {
+    console.log(`[voice-ai] [action] Forcing store_knowledge — user request contains store keyword`);
+    actionToolCalls.push({ name: 'store_knowledge', arguments: { text: userText } });
+  }
+
   // (captain's log + confirm_actions safety nets moved to top — see Safety net #0)
 
   } // end of safety nets guard (skipped for captain's log + confirm)
@@ -1313,6 +1334,41 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     } catch (err) {
       console.error(`[voice-ai] Tool error: ${fnName}: ${err.message}`);
       toolResults.push({ tool: fnName, args: fnArgs, error: err.message });
+    }
+  }
+
+  // Auto-learn: store useful facts discovered during tool execution into the KB.
+  // Only stores web search results that contain substantive data (not errors or empty).
+  for (const tr of toolResults) {
+    if (tr.error) continue;
+    // Auto-store web search findings
+    if (tr.tool === 'web_search_and_read' && tr.result?.pages?.length > 0) {
+      const keyFacts = [];
+      for (const p of tr.result.pages) {
+        if (p.content && p.content.length > 100) {
+          keyFacts.push(p.content.slice(0, 500));
+        }
+      }
+      if (keyFacts.length > 0) {
+        try {
+          await toolExecutor('store_knowledge', {
+            text: `Research on "${userText}": ${keyFacts.join(' | ').slice(0, 1000)}`,
+            title: `Research: ${userText.slice(0, 50)}`,
+            tags: 'auto-learn,research',
+          });
+          console.log(`[voice-ai] Auto-learned from web search: "${userText.slice(0, 50)}"`);
+        } catch {}
+      }
+    }
+    // Auto-store chart data (financial prices)
+    if (tr.tool === 'generate_chart' && tr.result?.ok && tr.result?.summary) {
+      try {
+        await toolExecutor('store_knowledge', {
+          text: tr.result.summary,
+          title: tr.result.chart || 'Chart data',
+          tags: 'auto-learn,chart,financial',
+        });
+      } catch {}
     }
   }
 
