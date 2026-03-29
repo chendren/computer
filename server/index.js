@@ -63,6 +63,7 @@ import { startMoshi, stopMoshi, getMoshiStatus } from './services/moshi.js';
 import { startVoxtralSTT, stopVoxtralSTT, getVoxtralSTTStatus } from './services/voxtral-stt.js';
 import { initMonitorPoller } from './services/monitor-poller.js';
 import { initSoundEffects } from './services/sound-effects.js';
+import { initTelegram, stopPolling as stopTelegramPolling } from './services/telegram.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(__dirname, '..');
@@ -142,6 +143,9 @@ console.log('[computer] Local services initialized');
 // Pre-generate sound effect WAVs (non-blocking, uses Kokoro TTS)
 initSoundEffects().catch(err => console.error('[computer] SFX init failed:', err.message));
 
+// Start Telegram bot (non-fatal)
+initTelegram(broadcast).catch(err => console.error('[computer] Telegram init failed:', err.message));
+
 // Start Voxtral STT sidecar (non-fatal, model loads in background)
 startVoxtralSTT(PLUGIN_ROOT).then(ok => {
   if (ok) console.log('[computer] Voxtral STT ready');
@@ -191,6 +195,7 @@ app.get('/api/health', async (req, res) => {
     },
     gmail: gmailStatus,
     voxtralStt: getVoxtralSTTStatus(),
+    telegram: (await import('./services/telegram.js')).getStatus(),
     moshi: getMoshiStatus(),
     config: getConfigSummary(),
   };
@@ -224,6 +229,13 @@ app.get('/api/gateway/channels', async (req, res) => {
     if (gmailStatus.connected) {
       channels.push({ id: 'gmail', name: 'Gmail', type: 'email', connected: true, email: gmailStatus.email });
     }
+    // Telegram
+    try {
+      const tg = (await import('./services/telegram.js')).getStatus();
+      if (tg.connected) {
+        channels.push({ id: 'telegram', name: 'Telegram', type: 'messaging', connected: true, bot: '@' + tg.botUsername, contacts: tg.knownContacts });
+      }
+    } catch {}
     res.json({ channels, connected: true });
   } catch {
     res.json({ channels: [], connected: true });
@@ -320,7 +332,18 @@ app.post('/api/gateway/send', sensitiveLimit, async (req, res) => {
     }
   }
 
-  res.status(400).json({ ok: false, error: 'Channel ' + channel + ' not available. Supported: gmail' });
+  // Route to Telegram
+  if (channel === 'telegram' || channel === 'tg') {
+    try {
+      const { sendMessage: tgSend } = await import('./services/telegram.js');
+      const result = await tgSend(target, text);
+      return res.json({ ok: true, result });
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  }
+
+  res.status(400).json({ ok: false, error: 'Channel ' + channel + ' not available. Supported: gmail, telegram' });
 });
 
 app.get('/api/gateway/plugins', async (req, res) => {
@@ -374,6 +397,7 @@ server.listen(PORT, () => {
 
 async function shutdown(signal) {
   console.log(`\n[computer] Received ${signal}, shutting down...`);
+  stopTelegramPolling();
   stopVoxtralSTT();
   stopMoshi();
   server.close(() => {

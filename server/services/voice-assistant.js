@@ -675,6 +675,21 @@ export const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'send_telegram',
+      description: 'Send a message via Telegram. Use when user says "send a telegram", "telegram message", "message on telegram", "text on telegram".',
+      parameters: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', description: 'Recipient username or name' },
+          text: { type: 'string', description: 'Message content' },
+        },
+        required: ['target', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'save_bookmark',
       description: 'Bookmark a URL or the current browser page. Use when user says "bookmark this", "save this page", "bookmark", "save this URL", "add to bookmarks".',
       parameters: {
@@ -1232,6 +1247,13 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     actionToolCalls.push({ name: 'save_bookmark', arguments: {} });
   }
 
+  // Safety net #20: Telegram routing.
+  const telegramKw = ['telegram', 'send a telegram', 'message on telegram'];
+  if (telegramKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'send_telegram')) {
+    console.log(`[voice-ai] [action] Forcing send_telegram — user request contains telegram keyword`);
+    actionToolCalls.push({ name: 'send_telegram', arguments: { target: '', text: userText } });
+  }
+
   // (captain's log + confirm_actions safety nets moved to top — see Safety net #0)
 
   } // end of safety nets guard (skipped for captain's log + confirm)
@@ -1770,6 +1792,16 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     session.messages.push({ role: 'user', content: enrichedText });
     session.messages.push({ role: 'assistant', content: spokenText });
     return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // send_telegram shortcut
+  const tgResult = toolResults.find(tr => tr.tool === 'send_telegram' && !tr.error);
+  if (tgResult && tgResult.result?.sent) {
+    const spokenText = `Telegram message sent.`;
+    console.log(`[voice-ai] [telegram-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch: 'channels' };
   }
 
   // save_bookmark shortcut

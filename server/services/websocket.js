@@ -1256,12 +1256,25 @@ Log entry: ${logText}`;
         return { ok: true, panel: input.panel };
       }
       case 'send_message': {
+        const channel = (input.channel || '').toLowerCase();
+        // Route to Telegram if specified
+        if (channel === 'telegram' || channel === 'tg') {
+          const { sendMessage: tgSend } = await import('./telegram.js');
+          const result = await tgSend(input.target, input.text);
+          return { sent: true, channel: 'telegram', ...result };
+        }
+        // Default: route through gateway (Gmail, etc.)
         const res = await fetch(`${baseUrl}/api/gateway/send`, {
           method: 'POST',
           headers: authHeaders(),
           body: JSON.stringify({ channel: input.channel, target: input.target, text: input.text }),
         });
         return await res.json();
+      }
+      case 'send_telegram': {
+        const { sendMessage: tgSend } = await import('./telegram.js');
+        const result = await tgSend(input.target, input.text);
+        return { sent: true, channel: 'telegram', ...result };
       }
       case 'list_channels': {
         const res = await fetch(`${baseUrl}/api/gateway/channels`, { headers: authHeaders() });
