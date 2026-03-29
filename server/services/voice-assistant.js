@@ -1247,9 +1247,10 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     actionToolCalls.push({ name: 'save_bookmark', arguments: {} });
   }
 
-  // Safety net #20: Telegram routing.
+  // Safety net #20: Telegram routing — only if no send_message or send_telegram already selected
   const telegramKw = ['telegram', 'send a telegram', 'message on telegram'];
-  if (telegramKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'send_telegram')) {
+  const hasTgCall = actionToolCalls.some(tc => tc.name === 'send_telegram' || (tc.name === 'send_message' && lowerText.includes('telegram')));
+  if (telegramKw.some(kw => lowerText.includes(kw)) && !hasTgCall) {
     console.log(`[voice-ai] [action] Forcing send_telegram — user request contains telegram keyword`);
     actionToolCalls.push({ name: 'send_telegram', arguments: { target: '', text: userText } });
   }
@@ -1794,11 +1795,12 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     return { text: spokenText, toolsUsed, panelSwitch };
   }
 
-  // send_telegram shortcut
-  const tgResult = toolResults.find(tr => tr.tool === 'send_telegram' && !tr.error);
-  if (tgResult && tgResult.result?.sent) {
-    const spokenText = `Telegram message sent.`;
-    console.log(`[voice-ai] [telegram-shortcut] Spoken: "${spokenText}"`);
+  // send_telegram / send_message shortcut — any successful message send
+  const tgResult = toolResults.find(tr => (tr.tool === 'send_telegram' || tr.tool === 'send_message') && !tr.error && tr.result?.sent);
+  if (tgResult) {
+    const channel = tgResult.result.channel || tgResult.tool.includes('telegram') ? 'Telegram' : 'message';
+    const spokenText = `${channel} message sent.`;
+    console.log(`[voice-ai] [message-shortcut] Spoken: "${spokenText}"`);
     session.messages.push({ role: 'user', content: enrichedText });
     session.messages.push({ role: 'assistant', content: spokenText });
     return { text: spokenText, toolsUsed, panelSwitch: 'channels' };
