@@ -142,12 +142,8 @@ export class VadService {
         },
 
         // ── Debug hooks ───────────────────────────────────────────────────────
-        onFrameProcessed: (probs) => {
-          // Log speech probability for each 30ms frame (only at >30% to avoid noise spam)
-          if (probs.isSpeech > 0.3) {
-            console.log('[VAD] Frame speech prob:', probs.isSpeech.toFixed(3));
-          }
-        },
+        // onFrameProcessed omitted — per-frame speech prob logging floods the console.
+        // SPEECH START / SPEECH END logs below provide sufficient visibility.
         onVADMisfire: () => {
           // Speech was detected but ended before minSpeechFrames — safely discarded
           console.log('[VAD] Misfire (speech too short)');

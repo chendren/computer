@@ -98,20 +98,30 @@ export async function startMoshi(pluginRoot) {
         if (!resolved) { resolved = true; resolve(false); }
       });
 
-      // Timeout: if not ready in 120s (model download may take time on first run),
-      // resolve false but leave process running
-      setTimeout(() => {
+      // Timeout: Moshi's Uvicorn logs don't always bubble up to Node.js stdout.
+      // Poll the HTTP endpoint instead of relying on log pattern matching.
+      setTimeout(async () => {
         if (!resolved) {
           resolved = true;
-          // Check if process is still alive — it might be downloading the model
           if (moshiProcess && !moshiProcess.killed) {
-            console.log('[moshi] Startup timeout — process still running (likely downloading model). Will check health later.');
-            resolve(false);
-          } else {
-            resolve(false);
+            // Poll HTTP endpoint to check if Moshi is actually serving
+            for (let attempt = 0; attempt < 5; attempt++) {
+              try {
+                const res = await fetch(MOSHI_HEALTH_URL, { signal: AbortSignal.timeout(2000) });
+                if (res.ok || res.status === 200) {
+                  moshiReady = true;
+                  console.log('[moshi] Ready on port ' + MOSHI_PORT + ' (detected via HTTP poll)');
+                  resolve(true);
+                  return;
+                }
+              } catch {}
+              await new Promise(r => setTimeout(r, 3000));
+            }
+            console.log('[moshi] Process running but HTTP not responding yet. Will retry on demand.');
           }
+          resolve(false);
         }
-      }, 120000);
+      }, 30000);
     } catch (err) {
       console.error('[moshi] Spawn error: ' + err.message);
       moshiProcess = null;

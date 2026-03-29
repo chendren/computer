@@ -879,6 +879,50 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     actionToolCalls.push({ name: calTool, arguments: wantsCreate ? { summary: userText } : {} });
   }
 
+  // Safety net #7: clipboard routing.
+  const clipboardKw = ['clipboard', 'what did i copy', 'read clipboard', 'copy to clipboard', 'paste'];
+  const wantsClipboard = clipboardKw.some(kw => lowerText.includes(kw));
+  if (wantsClipboard && !actionToolCalls.some(tc => tc.name === 'clipboard_read' || tc.name === 'clipboard_write')) {
+    const wantsRead = lowerText.includes('read') || lowerText.includes('what') || lowerText.includes('paste');
+    const clipTool = wantsRead ? 'clipboard_read' : 'clipboard_write';
+    console.log(`[voice-ai] [action] Forcing ${clipTool} — user request contains clipboard keyword`);
+    actionToolCalls.push({ name: clipTool, arguments: {} });
+  }
+
+  // Safety net #8: translate routing.
+  const translateKw = ['translate', 'how do you say', 'in japanese', 'in french', 'in spanish', 'in german', 'in chinese', 'in korean', 'in italian'];
+  const wantsTranslate = translateKw.some(kw => lowerText.includes(kw));
+  if (wantsTranslate && !actionToolCalls.some(tc => tc.name === 'translate_text')) {
+    console.log(`[voice-ai] [action] Forcing translate_text — user request contains translate keyword`);
+    actionToolCalls.push({ name: 'translate_text', arguments: { text: userText, target_language: '' } });
+  }
+
+  // Safety net #9: screenshot routing.
+  const screenshotKw = ['screenshot', 'what\'s on my screen', 'capture screen', 'describe my screen', 'what am i looking at'];
+  if (screenshotKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'take_screenshot')) {
+    console.log(`[voice-ai] [action] Forcing take_screenshot — user request contains screenshot keyword`);
+    actionToolCalls.push({ name: 'take_screenshot', arguments: {} });
+  }
+
+  // Safety net #10: calculator routing.
+  // Only trigger on math-specific phrases to avoid false positives with "what is" (too broad for general queries).
+  const calcKw = ['percent of', 'calculate', 'square root', 'convert'];
+  const currencyWords = ['dollars', 'euros', 'pounds', 'yen', 'rupees', 'currency'];
+  const wantsCalc = calcKw.some(kw => lowerText.includes(kw)) && (
+    !lowerText.includes('convert') || currencyWords.some(cw => lowerText.includes(cw))
+  );
+  if (wantsCalc && !actionToolCalls.some(tc => tc.name === 'calculate')) {
+    console.log(`[voice-ai] [action] Forcing calculate — user request contains calculator keyword`);
+    actionToolCalls.push({ name: 'calculate', arguments: { expression: userText } });
+  }
+
+  // Safety net #11: schedule management routing.
+  const schedKw = ['scheduled jobs', 'list schedules', 'scheduled tasks', 'cron'];
+  if (schedKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'manage_schedule')) {
+    console.log(`[voice-ai] [action] Forcing manage_schedule — user request contains schedule management keyword`);
+    actionToolCalls.push({ name: 'manage_schedule', arguments: { action: 'list' } });
+  }
+
   // Step 2: Execute action model-selected tools
   let loops = 0;
   for (const toolCall of actionToolCalls) {
