@@ -515,16 +515,20 @@ async function _fetchHistoricalPrices(currentPrice, timeRange, assetName) {
   const { count, unit } = timeRange;
   const now = new Date();
 
-  // Build expected date labels
+  // Build expected date labels using noon UTC to avoid timezone date-shift issues.
+  // Without this, local-time dates passed through toISOString() shift forward a day
+  // in western hemisphere timezones, causing mismatches with Yahoo Finance dates.
   const dates = [];
   for (let i = count - 1; i >= 0; i--) {
-    const d = new Date(now);
-    if (unit === 'day') d.setDate(d.getDate() - i);
-    else if (unit === 'week') d.setDate(d.getDate() - i * 7);
-    else if (unit === 'month') d.setMonth(d.getMonth() - i);
-    else if (unit === 'year') d.setFullYear(d.getFullYear() - i);
-    else if (unit === 'hour') d.setHours(d.getHours() - i);
-    else if (unit === 'quarter') d.setMonth(d.getMonth() - i * 3);
+    const y = now.getFullYear(), m = now.getMonth(), day = now.getDate();
+    let d;
+    if (unit === 'day') d = new Date(Date.UTC(y, m, day - i, 12));
+    else if (unit === 'week') d = new Date(Date.UTC(y, m, day - i * 7, 12));
+    else if (unit === 'month') d = new Date(Date.UTC(y, m - i, day, 12));
+    else if (unit === 'year') d = new Date(Date.UTC(y - i, m, day, 12));
+    else if (unit === 'hour') { d = new Date(now); d.setHours(d.getHours() - i); }
+    else if (unit === 'quarter') d = new Date(Date.UTC(y, m - i * 3, day, 12));
+    else d = new Date(Date.UTC(y, m, day - i, 12));
     dates.push(d);
   }
 
@@ -561,15 +565,19 @@ async function _fetchHistoricalPrices(currentPrice, timeRange, assetName) {
         const timestamps = result.timestamp;
         const closes = result.indicators?.quote?.[0]?.close || [];
 
-        // Build a date→price map from Yahoo data
+        // Build a date→price map from Yahoo data.
+        // Yahoo timestamps are market-close times (Eastern US). Convert to
+        // local date keys so they match the requested date keys.
         const priceByDate = new Map();
         for (let i = 0; i < timestamps.length; i++) {
           if (closes[i] != null) {
             const d = new Date(timestamps[i] * 1000);
-            const key = d.toISOString().split('T')[0];
+            // Use local date parts to build the key — matches how labels are built
+            const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
             priceByDate.set(key, parseFloat(closes[i].toFixed(2)));
           }
         }
+        console.log(`[chart] Yahoo dates available: ${[...priceByDate.keys()].join(', ')}`);
 
         // Map our requested dates to Yahoo prices
         const data = dates.map(d => {
