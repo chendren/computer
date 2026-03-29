@@ -150,6 +150,13 @@ class ComputerApp {
       }
     });
 
+    // Timer countdown — live update in status bar
+    this.ws.on('timer_started', (data) => {
+      if (data.endsAt) {
+        this.statusBar.setTimer(data.endsAt, data.label || '');
+      }
+    });
+
     // Panel switching via sidebar buttons
     const buttons = document.querySelectorAll('.lcars-button[data-panel]');
     buttons.forEach(btn => {
@@ -157,7 +164,35 @@ class ComputerApp {
     });
 
     // Auth first, then connect WS with token and load data
-    this._initAuth(wsProtocol).then(() => this.loadHistory());
+    this._initAuth(wsProtocol).then(() => {
+      this.loadHistory();
+      // Refresh services status every 30 seconds
+      setInterval(() => this._refreshServices(), 30000);
+    });
+  }
+
+  async _refreshServices() {
+    try {
+      const data = await this.api.get('/health');
+      this._updateServicesFromHealth(data);
+    } catch {}
+  }
+
+  _updateServicesFromHealth(data) {
+    const isUp = (val) => {
+      if (!val) return false;
+      if (typeof val === 'string') return val === 'online' || val === 'ready';
+      if (typeof val === 'object') return val.ready === true || val.running === true;
+      return !!val;
+    };
+    const services = [
+      { name: 'Ollama', up: isUp(data.ollama) },
+      { name: 'VectorDB', up: isUp(data.vectordb) },
+      { name: 'VoxtralSTT', up: isUp(data.voxtralStt) },
+      { name: 'Moshi', up: isUp(data.moshi) },
+    ];
+    const online = services.filter(s => s.up).length;
+    this.statusBar.setServices(online, services.length);
   }
 
   async _initAuth(wsProtocol) {
@@ -169,6 +204,8 @@ class ComputerApp {
         this.api.setAuthToken(data.authToken);
         this.ws.url = `${wsProtocol}//${location.host}?token=${data.authToken}`;
       }
+      this._updateServicesFromHealth(data);
+      this.statusBar.setVoiceMode('computer');
     } catch {
       // Health endpoint unreachable — connect without auth, will retry
     }

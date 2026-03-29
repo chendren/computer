@@ -573,6 +573,19 @@ export const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'generate_report',
+      description: 'Generate a daily activity report summarizing all voice commands, analyses, logs, and system activity. Use when user says "generate a report", "daily report", "activity report", "export report", "briefing report".',
+      parameters: {
+        type: 'object',
+        properties: {
+          timeframe: { type: 'string', description: 'Time range: "today", "yesterday", "this week" (default: today)' },
+        },
+      },
+    },
+  },
 ];
 
 // In-memory reminders (broadcast when due)
@@ -1013,6 +1026,13 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   if (schedKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'manage_schedule')) {
     console.log(`[voice-ai] [action] Forcing manage_schedule — user request contains schedule management keyword`);
     actionToolCalls.push({ name: 'manage_schedule', arguments: { action: 'list' } });
+  }
+
+  // Safety net #12: report generation routing.
+  const reportKw = ['generate a report', 'daily report', 'activity report', 'export report', 'briefing report'];
+  if (reportKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'generate_report')) {
+    console.log(`[voice-ai] [action] Forcing generate_report — user request contains report keyword`);
+    actionToolCalls.push({ name: 'generate_report', arguments: {} });
   }
 
   // Step 2: Execute action model-selected tools
@@ -1464,6 +1484,17 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     session.messages.push({ role: 'user', content: enrichedText });
     session.messages.push({ role: 'assistant', content: spokenText });
     return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // generate_report shortcut
+  const reportResult = toolResults.find(tr => tr.tool === 'generate_report' && !tr.error);
+  if (reportResult && reportResult.result?.summary) {
+    const s = reportResult.result.summary;
+    const spokenText = `Activity report for ${reportResult.result.timeframe}. ${s.voiceCommands} voice commands, ${s.analyses} analyses, ${s.logEntries} log entries, ${s.comparisons} comparisons.`;
+    console.log('[voice-ai] [report-shortcut] Spoken: "' + spokenText + '"');
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch: 'compare' };
   }
 
   // For all other tools, ask the response model to generate a spoken answer.

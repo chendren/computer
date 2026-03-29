@@ -1361,8 +1361,10 @@ function createToolExecutor(baseUrl, ws) {
           } catch {}
           setTimeout(() => broadcast('alert_status', { level: 'normal', reason: 'Timer acknowledged' }), 5000);
         }, secs * 1000);
-        _activeTimers.set(timerId, { handle: timerHandle, label, endsAt: Date.now() + secs * 1000 });
-        return { ok: true, timerId, durationHuman, label, endsAt: new Date(Date.now() + secs * 1000).toISOString() };
+        const endsAtMs = Date.now() + secs * 1000;
+        _activeTimers.set(timerId, { handle: timerHandle, label, endsAt: endsAtMs });
+        broadcast('timer_started', { endsAt: new Date(endsAtMs).toISOString(), label });
+        return { ok: true, timerId, durationHuman, label, endsAt: new Date(endsAtMs).toISOString() };
       }
       case 'get_weather': {
         let lat, lon, locationName;
@@ -1512,6 +1514,56 @@ function createToolExecutor(baseUrl, ws) {
         const result = await res.json();
         if (result.error) return result;
         return { summary: result.summary, topics: result.topics, actionItems: result.actionItems, title: result.title };
+      }
+      case 'generate_report': {
+        const timeframe = input.timeframe || 'today';
+        const [transcripts, analyses, logs, comparisons] = await Promise.all([
+          fetch(baseUrl + '/api/transcripts', { headers: authHeaders() }).then(r => r.json()).catch(() => []),
+          fetch(baseUrl + '/api/analyses', { headers: authHeaders() }).then(r => r.json()).catch(() => []),
+          fetch(baseUrl + '/api/logs', { headers: authHeaders() }).then(r => r.json()).catch(() => []),
+          fetch(baseUrl + '/api/comparisons', { headers: authHeaders() }).then(r => r.json()).catch(() => []),
+        ]);
+
+        const now = new Date();
+        const cutoff = new Date();
+        if (timeframe === 'yesterday') { cutoff.setDate(cutoff.getDate() - 1); cutoff.setHours(0,0,0,0); }
+        else if (timeframe === 'this week') { cutoff.setDate(cutoff.getDate() - 7); }
+        else { cutoff.setHours(0,0,0,0); }
+
+        const filterByDate = (items) => items.filter(item => {
+          const ts = item.timestamp || item.createdAt || item.date;
+          return ts && new Date(ts) >= cutoff;
+        });
+
+        const filteredTranscripts = filterByDate(transcripts);
+        const filteredAnalyses = filterByDate(analyses);
+        const filteredLogs = filterByDate(logs);
+        const filteredComparisons = filterByDate(comparisons);
+
+        const report = {
+          timeframe,
+          generated: now.toISOString(),
+          summary: {
+            voiceCommands: filteredTranscripts.filter(t => t.source === 'voice').length,
+            transcriptions: filteredTranscripts.filter(t => t.source !== 'voice').length,
+            analyses: filteredAnalyses.length,
+            logEntries: filteredLogs.length,
+            comparisons: filteredComparisons.length,
+          },
+          voiceCommands: filteredTranscripts.filter(t => t.source === 'voice').slice(0, 10).map(t => (t.text || '').slice(0, 200)),
+          logEntries: filteredLogs.slice(0, 5).map(l => (l.text || '').slice(0, 100)),
+        };
+
+        broadcast('comparison', {
+          title: 'Activity Report — ' + timeframe.charAt(0).toUpperCase() + timeframe.slice(1),
+          textA: JSON.stringify(report.summary, null, 2),
+          textB: (report.voiceCommands || []).join('\n'),
+          nameA: 'Summary',
+          nameB: 'Voice Commands',
+          verdict: `${report.summary.voiceCommands} voice commands, ${report.summary.analyses} analyses, ${report.summary.logEntries} log entries.`,
+        });
+
+        return report;
       }
       default:
         return { error: `Unknown tool: ${toolName}` };

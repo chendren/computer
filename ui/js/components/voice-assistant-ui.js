@@ -110,6 +110,7 @@ export class VoiceAssistantUI {
 
     this._createButton();       // ♦ diamond toggle button in the LCARS title bar
     this._createModeToggle();   // MOSHI / CMD mode label button
+    this._createSuggestionsPanel(); // "Try saying..." overlay for discoverability
     this._bindWsHandlers();     // handle all server → client events
     this._bindAudioCallbacks(); // connect audio playback end → state transition
     this._bindVadCallbacks();   // connect VAD speech events → recording flow
@@ -153,6 +154,74 @@ export class VoiceAssistantUI {
     if (titleBar) {
       titleBar.appendChild(this.modeButton);
     }
+  }
+
+  /**
+   * Create the "Try saying..." suggestions overlay for voice command discoverability.
+   * Appears when LISTENING, hides during other states. Dismissed permanently after
+   * the user's first successful voice command.
+   */
+  _createSuggestionsPanel() {
+    this._suggestionsDismissed = false;
+    this.suggestionsEl = document.createElement('div');
+    this.suggestionsEl.className = 'voice-suggestions';
+    this.suggestionsEl.style.display = 'none';
+
+    const suggestions = [
+      { category: 'Data', commands: ['"Computer, show me gold prices this week"', '"Computer, weather in Austin"', '"Computer, system resources"'] },
+      { category: 'Actions', commands: ['"Computer, set a timer for 5 minutes"', '"Computer, check my email"', '"Computer, red alert"'] },
+      { category: 'Create', commands: ['"Computer, log: mission briefing complete"', '"Computer, schedule a meeting at 2pm"', '"Computer, search for quantum computing"'] },
+      { category: 'Multi-step', commands: ['"Computer, search for silver prices, then chart them"', '"Computer, what\'s the gold price?" then "Computer, chart that"'] },
+    ];
+
+    const title = document.createElement('div');
+    title.className = 'voice-suggestions-title';
+    title.textContent = 'TRY SAYING...';
+    this.suggestionsEl.appendChild(title);
+
+    for (const group of suggestions) {
+      const groupEl = document.createElement('div');
+      groupEl.className = 'voice-suggestions-group';
+      const label = document.createElement('div');
+      label.className = 'voice-suggestions-label';
+      label.textContent = group.category;
+      groupEl.appendChild(label);
+      for (const cmd of group.commands) {
+        const cmdEl = document.createElement('div');
+        cmdEl.className = 'voice-suggestions-cmd';
+        cmdEl.textContent = cmd;
+        groupEl.appendChild(cmdEl);
+      }
+      this.suggestionsEl.appendChild(groupEl);
+    }
+
+    document.body.appendChild(this.suggestionsEl);
+  }
+
+  /**
+   * Show the suggestions overlay (only if not permanently dismissed).
+   */
+  _showSuggestions() {
+    if (!this._suggestionsDismissed && this.suggestionsEl) {
+      this.suggestionsEl.style.display = '';
+    }
+  }
+
+  /**
+   * Hide the suggestions overlay.
+   */
+  _hideSuggestions() {
+    if (this.suggestionsEl) {
+      this.suggestionsEl.style.display = 'none';
+    }
+  }
+
+  /**
+   * Permanently dismiss the suggestions overlay (after first successful command).
+   */
+  _dismissSuggestions() {
+    this._suggestionsDismissed = true;
+    this._hideSuggestions();
   }
 
   /**
@@ -206,6 +275,7 @@ export class VoiceAssistantUI {
       this.modeButton.textContent = 'CMD';
       this.modeButton.title = 'Voice Mode: Computer (Voxtral STT → Kokoro TTS) — click for Gemini mode';
     }
+    this.statusBar?.setVoiceMode(mode);
     console.log('[VoiceUI] Voice mode:', mode);
   }
 
@@ -471,10 +541,20 @@ export class VoiceAssistantUI {
       // Pause microphone while the assistant is talking or thinking
       this.vad.pause();
       if (this.geminiAudio) this.geminiAudio.pause();
-    } else if (newState === STATES.LISTENING || newState === STATES.MOSHI_ACTIVE || newState === STATES.GEMINI_ACTIVE || newState === STATES.OPENAI_ACTIVE || newState === STATES.NOVA_ACTIVE) {
-      // Resume mic when returning to an input-ready state
+      this._hideSuggestions();
+    } else if (newState === STATES.LISTENING) {
+      // Resume mic and show suggestions when in Computer LISTENING mode
       this.vad.resume();
       if (this.geminiAudio) this.geminiAudio.resume();
+      this._showSuggestions();
+    } else if (newState === STATES.MOSHI_ACTIVE || newState === STATES.GEMINI_ACTIVE || newState === STATES.OPENAI_ACTIVE || newState === STATES.NOVA_ACTIVE) {
+      // Resume mic for S2S modes — no suggestions (always-on conversation)
+      this.vad.resume();
+      if (this.geminiAudio) this.geminiAudio.resume();
+      this._hideSuggestions();
+    } else {
+      // IDLE, CAPTURING, PROCESSING, ERROR — hide suggestions
+      this._hideSuggestions();
     }
   }
 
@@ -553,6 +633,7 @@ export class VoiceAssistantUI {
       if (command !== null && command.length > 0) {
         // Wake word found: send command to server for AI processing
         this._setState(STATES.THINKING);
+        this._dismissSuggestions(); // user knows the drill now
         this._showStatus('Voice command: "' + command + '" — thinking...');
         console.log('[VoiceUI] Sending command:', command);
         this._wsSend('voice_command', { text: command });
