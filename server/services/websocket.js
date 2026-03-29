@@ -546,7 +546,14 @@ async function _fetchHistoricalPrices(currentPrice, timeRange, assetName) {
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?range=${yahooRange}&interval=${yahooInterval}`;
       console.log(`[chart] Yahoo Finance: ${url}`);
-      const res = await _fetchWithTimeout(url, 8000);
+      // Yahoo blocks browser-like UAs from Node.js — use a simple identifier
+      const controller = new AbortController();
+      const yahooTimeout = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'computer-lcars/1.0', 'Accept': 'application/json' },
+      });
+      clearTimeout(yahooTimeout);
       const json = await res.json();
       const result = json.chart?.result?.[0];
 
