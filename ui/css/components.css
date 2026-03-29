@@ -2942,20 +2942,22 @@
    ══════════════════════════════════════════════ */
 
 .voice-toggle {
-  background: none;
+  background: var(--lcars-bg);
   border: 2px solid #333;
   color: #555;
-  font-size: 20px;
-  width: 36px;
-  height: 36px;
+  font-size: 16px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-left: 12px;
+  margin-left: 8px;
   transition: all 0.3s;
   position: relative;
+  z-index: 1;
+  flex-shrink: 0;
 }
 
 /* IDLE — dim */
@@ -3037,7 +3039,7 @@
 
 /* Voice Mode Toggle Button */
 .voice-mode-toggle {
-  background: none;
+  background: var(--lcars-bg);
   border: 1px solid #444;
   color: #888;
   font-size: 9px;
@@ -3050,6 +3052,7 @@
   transition: all 0.3s;
   white-space: nowrap;
   flex-shrink: 0;
+  z-index: 1;
 }
 
 .voice-mode-toggle:hover {
@@ -3068,7 +3071,7 @@
 }
 
 .voice-always-on-toggle {
-  background: none;
+  background: var(--lcars-bg);
   border: 1px solid #9999FF;
   color: #9999FF;
   font-family: inherit;
@@ -3081,6 +3084,7 @@
   transition: all 0.3s;
   white-space: nowrap;
   flex-shrink: 0;
+  z-index: 1;
 }
 
 .voice-always-on-toggle:hover {
