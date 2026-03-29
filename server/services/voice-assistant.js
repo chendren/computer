@@ -586,6 +586,33 @@ export const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'get_news',
+      description: 'Get latest news headlines. Use when user says "news", "headlines", "what\'s happening", "latest news", "tech news", "world news", "breaking news".',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: { type: 'string', description: 'News topic or category (optional — e.g. "technology", "business", "sports")' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'define_word',
+      description: 'Define a word or explain a term. Use when user says "define", "what does X mean", "definition of", "what is the meaning of", "explain the word".',
+      parameters: {
+        type: 'object',
+        properties: {
+          word: { type: 'string', description: 'The word or term to define' },
+        },
+        required: ['word'],
+      },
+    },
+  },
 ];
 
 // In-memory reminders (broadcast when due)
@@ -1035,6 +1062,20 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     actionToolCalls.push({ name: 'generate_report', arguments: {} });
   }
 
+  // Safety net #13: news routing.
+  const newsKw = ['news', 'headlines', 'what\'s happening', 'breaking news'];
+  if (newsKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'get_news')) {
+    console.log(`[voice-ai] [action] Forcing get_news — user request contains news keyword`);
+    actionToolCalls.push({ name: 'get_news', arguments: {} });
+  }
+
+  // Safety net #14: define/dictionary routing.
+  const defineKw = ['define ', 'definition of', 'what does', 'meaning of', 'explain the word'];
+  if (defineKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'define_word')) {
+    console.log(`[voice-ai] [action] Forcing define_word — user request contains define keyword`);
+    actionToolCalls.push({ name: 'define_word', arguments: { word: userText } });
+  }
+
   // Step 2: Execute action model-selected tools
   let loops = 0;
   for (const toolCall of actionToolCalls) {
@@ -1081,6 +1122,8 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
         panelSwitch = 'compare';
       } else if (fnName === 'browse_url') {
         panelSwitch = 'browser';
+      } else if (fnName === 'get_news') {
+        panelSwitch = 'search';
       }
 
       toolResults.push({ tool: fnName, args: fnArgs, result });
@@ -1152,6 +1195,16 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     const levelName = a.level === 'normal' ? 'Alert status: normal operations resumed.' : `${a.level} alert activated.`;
     const spokenText = levelName + (a.reason ? ' ' + a.reason + '.' : '');
     console.log(`[voice-ai] [alert-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // For define_word, bypass LLM — speak the definition directly
+  const defineResult = toolResults.find(tr => tr.tool === 'define_word' && !tr.error);
+  if (defineResult && defineResult.result?.definition) {
+    const spokenText = defineResult.result.definition;
+    console.log(`[voice-ai] [define-shortcut] Spoken: "${spokenText}"`);
     session.messages.push({ role: 'user', content: enrichedText });
     session.messages.push({ role: 'assistant', content: spokenText });
     return { text: spokenText, toolsUsed, panelSwitch };
@@ -1495,6 +1548,20 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     session.messages.push({ role: 'user', content: enrichedText });
     session.messages.push({ role: 'assistant', content: spokenText });
     return { text: spokenText, toolsUsed, panelSwitch: 'compare' };
+  }
+
+  // For get_news, bypass LLM — speak top headlines directly
+  const newsResult = toolResults.find(tr => tr.tool === 'get_news' && !tr.error);
+  if (newsResult && newsResult.result?.headlines?.length > 0) {
+    const h = newsResult.result.headlines;
+    let spokenText = `${h.length} headlines. `;
+    spokenText += h.slice(0, 3).map(item => item.title).join('. ') + '.';
+    // Truncate for TTS
+    if (spokenText.length > 300) spokenText = spokenText.slice(0, 297) + '...';
+    console.log('[voice-ai] [news-shortcut] Spoken: "' + spokenText + '"');
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch: 'search' };
   }
 
   // For all other tools, ask the response model to generate a spoken answer.

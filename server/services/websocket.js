@@ -1429,6 +1429,28 @@ function createToolExecutor(baseUrl, ws) {
           } catch {}
           return { error: 'Currency conversion failed' };
         }
+        // Unit conversion check
+        const unitKeywords = ['miles', 'kilometers', 'km', 'feet', 'meters', 'inches', 'centimeters',
+          'pounds', 'kilograms', 'kg', 'lbs', 'ounces', 'grams', 'celsius', 'fahrenheit',
+          'gallons', 'liters', 'cups', 'tablespoons', 'teaspoons', 'acres', 'hectares',
+          'mph', 'kph', 'knots'];
+        const isUnit = unitKeywords.some(u => lower.includes(u));
+        if (isUnit) {
+          try {
+            const llmRes = await fetch(OLLAMA_BASE + '/v1/chat/completions', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: VOICE_MODEL, stream: false, temperature: 0,
+                messages: [{ role: 'user', content: 'Convert: "' + expr + '". Return ONLY JSON: {"result": 160.934, "formatted": "100 miles is 160.93 kilometers."}' }],
+              }),
+            });
+            const llmData = await llmRes.json();
+            let content = (llmData.choices?.[0]?.message?.content || '').trim();
+            if (content.startsWith('```')) { content = content.slice(content.indexOf('\n') + 1); const last = content.lastIndexOf('```'); if (last !== -1) content = content.slice(0, last); }
+            const parsed = JSON.parse(content.trim());
+            if (parsed.formatted) return { result: parsed.result, expression: expr, formatted: parsed.formatted };
+          } catch {}
+        }
         // Math: preprocess and evaluate safely
         let sanitized = expr;
         // Handle "X% of Y" as a unit before splitting % and "of" separately
@@ -1515,6 +1537,18 @@ function createToolExecutor(baseUrl, ws) {
         if (result.error) return result;
         return { summary: result.summary, topics: result.topics, actionItems: result.actionItems, title: result.title };
       }
+      case 'get_news': {
+        const topic = input.topic || '';
+        const query = topic ? `${topic} news today` : 'top news headlines today';
+        const searchResult = await _webSearch(query);
+        const headlines = (searchResult.results || []).slice(0, 5).map(r => ({
+          title: r.title,
+          snippet: r.snippet,
+          url: r.url,
+        }));
+        broadcast('search', { query, results: headlines, source: 'news' });
+        return { headlines, topic: topic || 'general', count: headlines.length };
+      }
       case 'generate_report': {
         const timeframe = input.timeframe || 'today';
         const [transcripts, analyses, logs, comparisons] = await Promise.all([
@@ -1564,6 +1598,19 @@ function createToolExecutor(baseUrl, ws) {
         });
 
         return report;
+      }
+      case 'define_word': {
+        const word = input.word || '';
+        const defRes = await fetch(OLLAMA_BASE + '/v1/chat/completions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: VOICE_MODEL, stream: false, temperature: 0, max_tokens: 150,
+            messages: [{ role: 'user', content: 'Define the word "' + word + '" concisely in 1-2 sentences. Include the part of speech. Example format: "Ephemeral (adjective): lasting for a very short time."' }],
+          }),
+        });
+        const defData = await defRes.json();
+        const definition = (defData.choices?.[0]?.message?.content || '').trim();
+        return { word, definition };
       }
       default:
         return { error: `Unknown tool: ${toolName}` };
