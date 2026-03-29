@@ -9,6 +9,7 @@ import { notify, notifyAlert, notifyComplete } from '../services/notifications.j
 import * as gmail from '../services/gmail.js';
 import * as gmailIntel from '../services/gmail-intelligence.js';
 import * as calendar from '../services/calendar.js';
+import { registerDynamicTool, unregisterDynamicTool, getDynamicTools, TOOLS } from '../services/voice-assistant.js';
 
 // Document upload storage — reuse same temp dir pattern as transcribe.js
 const docUpload = multer({
@@ -1531,6 +1532,36 @@ router.post('/documents/analyze', docUpload.single('file'), async (req, res) => 
       await fs.unlink(filePath).catch(() => {});
     }
   }
+});
+
+// ─── Dynamic Voice Tools API ────────────────────────────────────────────────
+
+router.get('/voice-tools', (req, res) => {
+  const dynamicTools = getDynamicTools();
+  const allTools = [...TOOLS, ...dynamicTools];
+  res.json({
+    tools: allTools.map(t => ({
+      name: t.function.name,
+      description: t.function.description,
+      parameters: t.function.parameters,
+      source: t._source || 'built-in',
+    })),
+    total: allTools.length,
+  });
+});
+
+router.post('/voice-tools', (req, res) => {
+  const { name, description, parameters, handler_url } = req.body;
+  if (!name || !description) {
+    return res.status(400).json({ error: 'name and description are required' });
+  }
+  const result = registerDynamicTool({ name, description, parameters, handler_url });
+  res.json(result);
+});
+
+router.delete('/voice-tools/:name', (req, res) => {
+  const ok = unregisterDynamicTool(req.params.name);
+  res.json({ ok });
 });
 
 export default router;

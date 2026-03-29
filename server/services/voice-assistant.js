@@ -7,11 +7,12 @@
  *
  * Processing pipeline per voice command:
  *   1. Auto-search: proactively fetch web results for queries needing current data.
- *   2. Tool routing: llama3.1 selects tools via /v1/chat/completions tool_calls.
- *   3. Safety nets: 18 keyword-based fallback rules correct common routing failures.
- *   4. Tool execution: run selected tools via the internal tool executor.
- *   5. Shortcut responses: bypass LLM for predictable results (time, charts, email).
- *   6. Response generation: LLM synthesizes natural spoken response from tool results.
+ *   2. Fast-path: skip action model entirely for unambiguous keyword-matched commands.
+ *   3. Tool routing: llama3.1 selects tools via /v1/chat/completions tool_calls.
+ *   4. Safety nets: 18 keyword-based fallback rules correct common routing failures.
+ *   5. Tool execution: run selected tools via the internal tool executor.
+ *   6. Shortcut responses: bypass LLM for predictable results (time, charts, email).
+ *   7. Response generation: LLM synthesizes natural spoken response from tool results.
  *
  * Additional capabilities:
  *   - Conversation memory with per-session history (20 turns, 4-hour TTL)
@@ -781,6 +782,42 @@ export const TOOLS = [
   },
 ];
 
+// Dynamic tools registered via API at runtime
+const _dynamicTools = [];
+
+export function registerDynamicTool({ name, description, parameters, handler_url }) {
+  const existing = _dynamicTools.findIndex(t => t.function.name === name);
+  if (existing !== -1) _dynamicTools.splice(existing, 1);
+
+  const tool = {
+    type: 'function',
+    function: {
+      name,
+      description,
+      parameters: parameters || { type: 'object', properties: {} },
+    },
+    _source: 'plugin',
+    _handler_url: handler_url,
+  };
+  _dynamicTools.push(tool);
+  console.log(`[voice-ai] Registered dynamic tool: ${name}`);
+  return { registered: true, name };
+}
+
+export function unregisterDynamicTool(name) {
+  const idx = _dynamicTools.findIndex(t => t.function.name === name);
+  if (idx !== -1) {
+    _dynamicTools.splice(idx, 1);
+    console.log(`[voice-ai] Unregistered dynamic tool: ${name}`);
+    return true;
+  }
+  return false;
+}
+
+export function getDynamicTools() {
+  return _dynamicTools;
+}
+
 // In-memory reminders (broadcast when due)
 const _reminders = [];
 
@@ -828,7 +865,7 @@ async function callActionModel(userText, recentHistory = []) {
       ...recentHistory.slice(-4),
       { role: 'user', content: userText },
     ],
-    tools: TOOLS,
+    tools: [...TOOLS, ..._dynamicTools],
     stream: false,
   };
 
@@ -1078,30 +1115,6 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   // Step 1: Ask action model what tools to call (tool routing)
   let actionToolCalls = [];
 
-  if (chainedSubCommands) {
-    // Multi-step chain: route each sub-command through the action model independently
-    console.log(`[voice-ai] [action] Chain routing ${chainedSubCommands.length} sub-commands`);
-    for (const sub of chainedSubCommands) {
-      try {
-        const subCalls = await callActionModel(sub, session.messages.slice(-4));
-        console.log(`[voice-ai] [action] Sub-command "${sub}" -> ${subCalls.length} tool(s): ${subCalls.map(t => t.name).join(', ') || 'none'}`);
-        actionToolCalls.push(...subCalls);
-      } catch (err) {
-        console.warn(`[voice-ai] [action] Sub-command "${sub}" routing failed: ${err.message}`);
-      }
-    }
-    console.log(`[voice-ai] [action] Chain total: ${actionToolCalls.length} tool(s): ${actionToolCalls.map(t => t.name).join(', ')}`);
-  } else {
-    // Single command: normal routing
-    console.log(`[voice-ai] [action] Routing: "${resolvedText}"`);
-    try {
-      actionToolCalls = await callActionModel(resolvedText, session.messages.slice(-4));
-      console.log(`[voice-ai] [action] Selected ${actionToolCalls.length} tool(s): ${actionToolCalls.map(t => t.name).join(', ') || 'none'}`);
-    } catch (err) {
-      console.warn(`[voice-ai] [action] Routing failed, falling back to no tools: ${err.message}`);
-    }
-  }
-
   // Safety net #0: captain's log — MUST be first. When the user says "captain's log",
   // the entire utterance is a log entry. The log's own LLM analysis will detect actions
   // (email, calendar, reminders) inside the entry. Other safety nets must NOT fire
@@ -1133,8 +1146,94 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     }
   }
 
-  // All remaining safety nets are skipped when captain's log or confirm_actions is active
-  if (!isLogEntry && !actionToolCalls.some(tc => tc.name === 'confirm_actions')) {
+  // ── Fast-path: skip action model for unambiguous commands ──
+  // These commands are so obvious from keywords alone that routing through
+  // the LLM is wasted latency. The safety nets would add them anyway.
+  let skipActionModel = false;
+
+  if (!isLogEntry && actionToolCalls.length === 0) {
+    // Time
+    if (originalLower === 'what time is it' || originalLower === 'time' || originalLower === 'current time' || originalLower === 'what is the time' || originalLower === 'stardate') {
+      actionToolCalls = [{ name: 'get_time', arguments: {} }];
+      skipActionModel = true;
+    }
+    // Alerts
+    else if (originalLower.includes('red alert')) {
+      actionToolCalls = [{ name: 'set_alert', arguments: { level: 'red' } }];
+      skipActionModel = true;
+    }
+    else if (originalLower.includes('yellow alert')) {
+      actionToolCalls = [{ name: 'set_alert', arguments: { level: 'yellow' } }];
+      skipActionModel = true;
+    }
+    else if (originalLower.includes('stand down') || originalLower.includes('cancel alert') || originalLower.includes('all clear')) {
+      actionToolCalls = [{ name: 'set_alert', arguments: { level: 'normal' } }];
+      skipActionModel = true;
+    }
+    // System info
+    else if (originalLower === 'system resources' || originalLower === 'system info' || originalLower === 'system status') {
+      actionToolCalls = [{ name: 'system_info', arguments: {} }];
+      skipActionModel = true;
+    }
+    // Weather (no location = fast)
+    else if (originalLower === 'weather' || originalLower === 'what is the weather' || originalLower === 'weather forecast') {
+      actionToolCalls = [{ name: 'get_weather', arguments: {} }];
+      skipActionModel = true;
+    }
+    // Check email
+    else if (originalLower === 'check my email' || originalLower === 'check email' || originalLower === 'any new email') {
+      actionToolCalls = [{ name: 'check_email', arguments: {} }];
+      skipActionModel = true;
+    }
+    // Standup
+    else if (originalLower === 'standup' || originalLower === 'daily standup') {
+      actionToolCalls = [{ name: 'daily_standup', arguments: {} }];
+      skipActionModel = true;
+    }
+    // Network
+    else if (originalLower === 'what is my ip' || originalLower.includes('my ip address') || originalLower === 'network info') {
+      actionToolCalls = [{ name: 'network_info', arguments: {} }];
+      skipActionModel = true;
+    }
+    // Status
+    else if (originalLower === 'status' || originalLower === 'ship status') {
+      actionToolCalls = [{ name: 'get_status', arguments: {} }];
+      skipActionModel = true;
+    }
+
+    if (skipActionModel) {
+      console.log(`[voice-ai] Fast-path: ${actionToolCalls[0].name} (skipped action model)`);
+    }
+  }
+
+  if (!skipActionModel && !isLogEntry && actionToolCalls.length === 0) {
+    if (chainedSubCommands) {
+      // Multi-step chain: route each sub-command through the action model independently
+      console.log(`[voice-ai] [action] Chain routing ${chainedSubCommands.length} sub-commands`);
+      for (const sub of chainedSubCommands) {
+        try {
+          const subCalls = await callActionModel(sub, session.messages.slice(-4));
+          console.log(`[voice-ai] [action] Sub-command "${sub}" -> ${subCalls.length} tool(s): ${subCalls.map(t => t.name).join(', ') || 'none'}`);
+          actionToolCalls.push(...subCalls);
+        } catch (err) {
+          console.warn(`[voice-ai] [action] Sub-command "${sub}" routing failed: ${err.message}`);
+        }
+      }
+      console.log(`[voice-ai] [action] Chain total: ${actionToolCalls.length} tool(s): ${actionToolCalls.map(t => t.name).join(', ')}`);
+    } else {
+      // Single command: normal routing
+      console.log(`[voice-ai] [action] Routing: "${resolvedText}"`);
+      try {
+        actionToolCalls = await callActionModel(resolvedText, session.messages.slice(-4));
+        console.log(`[voice-ai] [action] Selected ${actionToolCalls.length} tool(s): ${actionToolCalls.map(t => t.name).join(', ') || 'none'}`);
+      } catch (err) {
+        console.warn(`[voice-ai] [action] Routing failed, falling back to no tools: ${err.message}`);
+      }
+    }
+  }
+
+  // All remaining safety nets are skipped when captain's log, confirm_actions, or fast-path is active
+  if (!isLogEntry && !skipActionModel && !actionToolCalls.some(tc => tc.name === 'confirm_actions')) {
 
   // Safety net #1: email tool routing.
   // The action model sometimes fails to select the correct email tool or selects none at all.
