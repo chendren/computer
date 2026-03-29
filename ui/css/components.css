@@ -3664,25 +3664,25 @@ body.alert-blue .lcars-sidebar { border-color: #3366CC; }
   padding: 2px 0;
 }
 
-/* ── Quick Actions Bar ── */
+/* ── Quick Actions (inside sidebar) ── */
 .quick-actions {
-  display: flex;
-  gap: 4px;
-  padding: 4px 16px;
-  background: rgba(0, 0, 0, 0.3);
-  border-bottom: 1px solid #333;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 4px;
+  margin-bottom: 8px;
 }
 .quick-action-btn {
-  background: rgba(153, 153, 255, 0.15);
-  border: 1px solid #666;
+  background: rgba(153, 153, 255, 0.1);
+  border: 1px solid #444;
   color: #9999FF;
   font-family: 'Antonio', sans-serif;
-  font-size: 11px;
+  font-size: 9px;
   letter-spacing: 1px;
-  padding: 4px 12px;
+  padding: 6px 2px;
   cursor: pointer;
   border-radius: 2px;
+  text-align: center;
 }
 .quick-action-btn:hover {
   background: rgba(255, 153, 0, 0.2);
