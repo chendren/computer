@@ -1830,10 +1830,6 @@ async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
   try {
     sendTo(ws, 'voice_thinking', {});
 
-    // Play acknowledge sound on wake word detection
-    const ackUrl = getSoundEffect('sfx-acknowledge');
-    if (ackUrl) sendTo(ws, 'play_sound', { url: ackUrl });
-
     const toolExecutor = createToolExecutor(baseUrl, ws);
     const result = await processVoiceCommand(sessionId, text, toolExecutor);
     console.log(`[ws] Voice result: text="${result.text?.slice(0, 100)}", tools=[${result.toolsUsed?.join(', ')}], panel=${result.panelSwitch}`);
