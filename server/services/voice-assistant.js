@@ -1021,15 +1021,18 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     return { text: spokenText, toolsUsed, panelSwitch };
   }
 
-  // For all other tools, ask Scout to generate the response
-  let responsePrompt = enrichedText;
+  // For all other tools, ask the response model to generate a spoken answer.
+  // Cap tool results to ~1500 chars total — small models (nemotron 4B) choke on
+  // large prompts and return empty responses. Voice answers should be short anyway.
+  let responsePrompt = userText;
   if (toolResults.length > 0) {
+    const maxPerTool = Math.floor(1500 / toolResults.length);
     const toolContext = toolResults.map(tr => {
       if (tr.error) {
         return `[${tr.tool}] Error: ${tr.error}`;
       }
       const resultStr = typeof tr.result === 'string' ? tr.result : JSON.stringify(tr.result);
-      return `[${tr.tool}] Result:\n${resultStr.slice(0, 5000)}`;
+      return `[${tr.tool}] Result:\n${resultStr.slice(0, maxPerTool)}`;
     }).join('\n\n');
 
     responsePrompt = `User request: ${userText}\n\nTool results:\n${toolContext}\n\nRespond to the user based on the tool results above. Be concise — this will be spoken aloud. Do not add action tags, sound effects, or markdown.`;
