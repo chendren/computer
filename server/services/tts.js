@@ -124,3 +124,6 @@ export async function cleanupTTSFiles(maxAgeMs = 300000) {
 
 // Auto-cleanup every 5 minutes
 setInterval(() => cleanupTTSFiles(), 300000);
+
+// Pre-warm: start loading model in background (non-blocking)
+getTTS().catch(() => {});

@@ -402,6 +402,7 @@ function _resolveYahooSymbol(assetName) {
 
 // ── Active timers ─────────────────────────────────────────
 const _activeTimers = new Map();
+export { _activeTimers };
 
 // ── Weather code descriptions (WMO) ──────────────────────
 const WMO_CODES = {
@@ -1509,6 +1510,43 @@ function authHeaders() {
 }
 
 /**
+ * Split text into sentences at ". ", "! ", "? " boundaries.
+ * Uses string methods only (no regex). Returns non-empty trimmed segments.
+ */
+function splitSentences(text) {
+  const delimiters = ['. ', '! ', '? '];
+  const sentences = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    let earliestIdx = -1;
+    let earliestDelim = '';
+
+    for (const delim of delimiters) {
+      const idx = remaining.indexOf(delim);
+      if (idx !== -1 && (earliestIdx === -1 || idx < earliestIdx)) {
+        earliestIdx = idx;
+        earliestDelim = delim;
+      }
+    }
+
+    if (earliestIdx === -1) {
+      // No more delimiters — rest is the final segment
+      const trimmed = remaining.trim();
+      if (trimmed.length > 0) sentences.push(trimmed);
+      break;
+    }
+
+    // Include the punctuation character but not the trailing space
+    const segment = remaining.slice(0, earliestIdx + earliestDelim.length - 1).trim();
+    if (segment.length > 0) sentences.push(segment);
+    remaining = remaining.slice(earliestIdx + earliestDelim.length);
+  }
+
+  return sentences;
+}
+
+/**
  * Handle a voice command: Claude Haiku processing → TTS → response.
  */
 async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
@@ -1520,31 +1558,83 @@ async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
     const result = await processVoiceCommand(sessionId, text, toolExecutor);
     console.log(`[ws] Voice result: text="${result.text?.slice(0, 100)}", tools=[${result.toolsUsed?.join(', ')}], panel=${result.panelSwitch}`);
 
-    // Generate TTS for the response
-    let audioUrl = null;
-    if (result.text) {
-      try {
-        const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({ text: result.text }),
-        });
-        const ttsData = await ttsRes.json();
-        audioUrl = ttsData.audioUrl || null;
-        console.log(`[ws] TTS: audioUrl=${audioUrl}`);
-      } catch (err) {
-        console.error(`[ws] TTS failed:`, err.message);
-      }
-    }
-
     // Broadcast panel switch for any tool that requests it
     if (result.panelSwitch) {
       sendTo(ws, 'voice_panel_switch', { panel: result.panelSwitch });
     }
 
+    // Generate TTS for the response
+    let audioUrl = null;
+    let streamed = false;
+
+    if (result.text) {
+      if (result.text.length <= 100) {
+        // Short response — single WAV (fast enough, no streaming needed)
+        try {
+          const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ text: result.text }),
+          });
+          const ttsData = await ttsRes.json();
+          audioUrl = ttsData.audioUrl || null;
+          console.log(`[ws] TTS (single): audioUrl=${audioUrl}`);
+        } catch (err) {
+          console.error(`[ws] TTS failed:`, err.message);
+        }
+      } else {
+        // Long response — split into sentences and stream each chunk
+        const sentences = splitSentences(result.text);
+        console.log(`[ws] TTS streaming: ${sentences.length} sentence(s)`);
+
+        let chunkIndex = 0;
+        let anyChunkSent = false;
+        for (const sentence of sentences) {
+          try {
+            const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, {
+              method: 'POST',
+              headers: authHeaders(),
+              body: JSON.stringify({ text: sentence }),
+            });
+            const ttsData = await ttsRes.json();
+            if (ttsData.audioUrl) {
+              sendTo(ws, 'voice_audio_chunk', {
+                audioUrl: ttsData.audioUrl,
+                index: chunkIndex,
+                total: sentences.length,
+              });
+              anyChunkSent = true;
+              console.log(`[ws] TTS chunk ${chunkIndex + 1}/${sentences.length}: ${ttsData.audioUrl}`);
+            }
+          } catch (err) {
+            console.error(`[ws] TTS chunk ${chunkIndex + 1} failed:`, err.message);
+          }
+          chunkIndex++;
+        }
+
+        if (anyChunkSent) {
+          streamed = true;
+        } else {
+          // All chunks failed — fall back to single WAV for the full text
+          try {
+            const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, {
+              method: 'POST',
+              headers: authHeaders(),
+              body: JSON.stringify({ text: result.text }),
+            });
+            const ttsData = await ttsRes.json();
+            audioUrl = ttsData.audioUrl || null;
+            console.log(`[ws] TTS fallback (single): audioUrl=${audioUrl}`);
+          } catch (err) {
+            console.error(`[ws] TTS fallback failed:`, err.message);
+          }
+        }
+      }
+    }
+
     sendTo(ws, 'voice_response', {
       text: result.text,
-      audioUrl,
+      audioUrl: streamed ? null : audioUrl,
       toolsUsed: result.toolsUsed,
       panelSwitch: result.panelSwitch,
     });

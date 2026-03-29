@@ -574,11 +574,12 @@ const MAX_TOOL_LOOPS = 10;
  * Uses standard OpenAI tool_calls format — finish_reason: "tool_calls"
  * with message.tool_calls array of {id, function: {name, arguments}}.
  */
-async function callActionModel(userText) {
+async function callActionModel(userText, recentHistory = []) {
   const body = {
     model: ACTION_MODEL,
     messages: [
       { role: 'system', content: getActionSystemPrompt() },
+      ...recentHistory.slice(-4),
       { role: 'user', content: userText },
     ],
     tools: TOOLS,
@@ -687,6 +688,26 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   let panelSwitch = null;
   const toolResults = [];
 
+  // Resolve pronouns using recent conversation context.
+  // When the user says "chart that" or "search for it", inject the subject from the
+  // last exchange so keyword detection and the LLM both know what "that" refers to.
+  let resolvedText = userText;
+  const pronouns = ['that', 'it', 'those', 'them', 'this', 'the same'];
+  const hasPronouns = pronouns.some(p => userText.toLowerCase().includes(p));
+  if (hasPronouns && session.messages.length >= 2) {
+    const lastExchange = session.messages.slice(-2);
+    const lastUserMsg = lastExchange.find(m => m.role === 'user');
+    const lastAssistantMsg = lastExchange.find(m => m.role === 'assistant');
+    if (lastUserMsg) {
+      resolvedText = userText + ' (context: user previously asked "' + lastUserMsg.content.slice(0, 200) + '"';
+      if (lastAssistantMsg) {
+        resolvedText += ' and the computer replied "' + lastAssistantMsg.content.slice(0, 200) + '"';
+      }
+      resolvedText += ')';
+      console.log(`[voice-ai] Pronoun resolved: "${resolvedText.slice(0, 150)}..."`);
+    }
+  }
+
   // Auto-search: detect queries that need current data not in the model's training.
   // If these keywords appear, proactively fetch web results and inject the facts
   // into the prompt BEFORE calling the action model. This way the model has real data to
@@ -699,10 +720,10 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     'eth', 'gold', 'silver', 'platinum', 'oil', 'nasdaq', 'dow', 's&p', 'crypto',
     'search for', 'look up', 'find out', 'information about', 'tell me about',
     'what is', 'who is', 'where is', 'when did', 'how many', 'population'];
-  const lowerText = userText.toLowerCase();
+  const lowerText = resolvedText.toLowerCase();
   const needsSearch = searchKeywords.some(kw => lowerText.includes(kw));
 
-  let enrichedText = userText;
+  let enrichedText = resolvedText;
   let directAnswer = null; // If set, skip Scout LLM and use this directly
   if (needsSearch) {
     console.log(`[voice-ai] Auto-search triggered for: "${userText}"`);
@@ -795,10 +816,10 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   }
 
   // Step 1: Ask action model what tools to call (tool routing)
-  console.log(`[voice-ai] [action] Routing: "${userText}"`);
+  console.log(`[voice-ai] [action] Routing: "${resolvedText}"`);
   let actionToolCalls = [];
   try {
-    actionToolCalls = await callActionModel(userText);
+    actionToolCalls = await callActionModel(resolvedText, session.messages.slice(-4));
     console.log(`[voice-ai] [action] Selected ${actionToolCalls.length} tool(s): ${actionToolCalls.map(t => t.name).join(', ') || 'none'}`);
   } catch (err) {
     console.warn(`[voice-ai] [action] Routing failed, falling back to no tools: ${err.message}`);
@@ -842,7 +863,7 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   const hasChartCall = actionToolCalls.some(tc => tc.name === 'generate_chart');
   if (!hasChartCall && wantsViz && !wantsEmail) {
     console.log(`[voice-ai] [action] Forcing generate_chart — user request contains visualization keyword`);
-    actionToolCalls.push({ name: 'generate_chart', arguments: { query: userText } });
+    actionToolCalls.push({ name: 'generate_chart', arguments: { query: resolvedText } });
   }
 
   // Safety net #3: weather routing.
@@ -941,9 +962,9 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
       fnArgs = {};
     }
 
-    // generate_chart: always pass original user text as query — the action model can't be trusted to do this
+    // generate_chart: always pass resolved user text as query so pronoun context flows through
     if (fnName === 'generate_chart') {
-      fnArgs = { query: userText };
+      fnArgs = { query: resolvedText };
     }
 
     // Skip web_search_and_read if auto-search already ran
@@ -1376,7 +1397,7 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
 
   // For all other tools, ask the response model to generate a spoken answer.
   // Cap tool results to ~1500 chars total — small models choke on large prompts.
-  let responsePrompt = userText;
+  let responsePrompt = resolvedText;
   if (toolResults.length > 0) {
     const maxPerTool = Math.floor(1500 / toolResults.length);
     const toolContext = toolResults.map(tr => {
@@ -1387,7 +1408,7 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
       return `[${tr.tool}] Result:\n${resultStr.slice(0, maxPerTool)}`;
     }).join('\n\n');
 
-    responsePrompt = `User request: ${userText}\n\nTool results:\n${toolContext}\n\nRespond to the user based on the tool results above. Be concise — this will be spoken aloud. Do not add action tags, sound effects, or markdown.`;
+    responsePrompt = `User request: ${resolvedText}\n\nTool results:\n${toolContext}\n\nRespond to the user based on the tool results above. Be concise — this will be spoken aloud. Do not add action tags, sound effects, or markdown.`;
   }
 
   session.messages.push({ role: 'user', content: responsePrompt });

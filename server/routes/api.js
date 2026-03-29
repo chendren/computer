@@ -1,9 +1,11 @@
 import { Router } from 'express';
+import os from 'os';
 import { transcripts, analyses, sessions, logs, monitors, comparisons } from '../services/storage.js';
-import { broadcast } from '../services/websocket.js';
+import { broadcast, _activeTimers } from '../services/websocket.js';
 import { notify, notifyAlert, notifyComplete } from '../services/notifications.js';
 import * as gmail from '../services/gmail.js';
 import * as gmailIntel from '../services/gmail-intelligence.js';
+import * as calendar from '../services/calendar.js';
 
 const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';
 const VOICE_MODEL = process.env.VOICE_MODEL || 'llama4:scout';
@@ -1247,6 +1249,149 @@ router.use('/monitors', (req, res, next) => {
     } catch {}
   };
   next();
+});
+
+// ── Live Dashboard Widget Endpoints ──────────────────────────────
+
+const WMO_CODES = {
+  0: 'Clear Sky', 1: 'Mainly Clear', 2: 'Partly Cloudy', 3: 'Overcast',
+  45: 'Foggy', 48: 'Rime Fog', 51: 'Light Drizzle', 53: 'Drizzle', 55: 'Heavy Drizzle',
+  61: 'Slight Rain', 63: 'Rain', 65: 'Heavy Rain', 66: 'Freezing Rain', 67: 'Heavy Freezing Rain',
+  71: 'Slight Snow', 73: 'Snow', 75: 'Heavy Snow', 77: 'Snow Grains',
+  80: 'Slight Showers', 81: 'Showers', 82: 'Heavy Showers',
+  85: 'Slight Snow Showers', 86: 'Heavy Snow Showers',
+  95: 'Thunderstorm', 96: 'Thunderstorm with Hail', 99: 'Severe Thunderstorm with Hail',
+};
+
+let _weatherCache = null;
+let _weatherCacheTime = 0;
+let _geoCache = null;
+let _geoCacheTime = 0;
+
+router.get('/system-info', (req, res) => {
+  const cpus = os.cpus();
+  const cpuModel = cpus.length > 0 ? cpus[0].model : 'Unknown';
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = totalMem - freeMem;
+  const uptimeSecs = os.uptime();
+
+  const days = Math.floor(uptimeSecs / 86400);
+  const hours = Math.floor((uptimeSecs - days * 86400) / 3600);
+  const mins = Math.floor((uptimeSecs - days * 86400 - hours * 3600) / 60);
+  let uptimeStr = '';
+  if (days > 0) uptimeStr += days + 'd ';
+  if (hours > 0 || days > 0) uptimeStr += hours + 'h ';
+  uptimeStr += mins + 'm';
+
+  res.json({
+    cpu: { cores: cpus.length, model: cpuModel },
+    memory: {
+      used: Math.round(usedMem / (1024 * 1024 * 1024) * 10) / 10,
+      total: Math.round(totalMem / (1024 * 1024 * 1024) * 10) / 10,
+    },
+    uptime: uptimeStr.trim(),
+    platform: os.platform(),
+    arch: os.arch(),
+    hostname: os.hostname(),
+    loadAvg: os.loadavg().map(v => Math.round(v * 100) / 100),
+  });
+});
+
+router.get('/weather', async (req, res) => {
+  try {
+    const now = Date.now();
+
+    // Use cached weather if less than 10 minutes old
+    if (_weatherCache && now - _weatherCacheTime < 600000) {
+      return res.json(_weatherCache);
+    }
+
+    // Geolocate via IP (cache for 1 hour)
+    if (!_geoCache || now - _geoCacheTime > 3600000) {
+      const geoApis = [
+        { url: 'https://ipapi.co/json/', parse: d => ({ lat: d.latitude, lon: d.longitude, city: d.city, region: d.region }) },
+        { url: 'http://ip-api.com/json/', parse: d => ({ lat: d.lat, lon: d.lon, city: d.city, region: d.regionName }) },
+      ];
+      for (const api of geoApis) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 3000);
+          const ipRes = await fetch(api.url, { signal: controller.signal });
+          clearTimeout(timeout);
+          const ipData = await ipRes.json();
+          const loc = api.parse(ipData);
+          if (loc.lat && loc.lon) { _geoCache = loc; _geoCacheTime = now; break; }
+        } catch {}
+      }
+      if (!_geoCache) return res.json({ error: 'Could not determine location' });
+    }
+
+    const { lat, lon, city, region } = _geoCache;
+    const wxUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=3`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const wxRes = await fetch(wxUrl, { signal: controller.signal });
+    clearTimeout(timeout);
+    const wx = await wxRes.json();
+    const cur = wx.current;
+    const daily = wx.daily;
+    const forecast = daily ? daily.time.map((d, i) => ({
+      day: d,
+      high: Math.round(daily.temperature_2m_max[i]),
+      low: Math.round(daily.temperature_2m_min[i]),
+      description: WMO_CODES[daily.weather_code[i]] || 'Unknown',
+    })) : [];
+
+    const result = {
+      location: city + (region ? ', ' + region : ''),
+      current: {
+        temperature: Math.round(cur.temperature_2m),
+        feelsLike: Math.round(cur.apparent_temperature),
+        humidity: cur.relative_humidity_2m,
+        wind: Math.round(cur.wind_speed_10m),
+        description: WMO_CODES[cur.weather_code] || 'Unknown',
+      },
+      forecast,
+    };
+    _weatherCache = result;
+    _weatherCacheTime = now;
+    res.json(result);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+router.get('/calendar/next', async (req, res) => {
+  try {
+    const status = calendar.getStatus();
+    if (!status.connected) {
+      return res.json({ next: null, count: 0, error: 'Calendar not connected' });
+    }
+    const now = new Date();
+    const tomorrow = new Date(now.getTime() + 86400000);
+    const events = await calendar.listEvents(now.toISOString(), tomorrow.toISOString());
+    const next = events.length > 0 ? events[0] : null;
+    res.json({ next, count: events.length, connected: true });
+  } catch (err) {
+    res.json({ next: null, count: 0, error: err.message });
+  }
+});
+
+router.get('/timers', (req, res) => {
+  const now = Date.now();
+  const timers = [];
+  for (const [id, timer] of _activeTimers) {
+    const remaining = Math.max(0, timer.endsAt - now);
+    timers.push({
+      id,
+      label: timer.label || null,
+      remainingMs: remaining,
+      remainingSecs: Math.ceil(remaining / 1000),
+      endsAt: new Date(timer.endsAt).toISOString(),
+    });
+  }
+  res.json({ timers, count: timers.length });
 });
 
 export default router;

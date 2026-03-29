@@ -557,17 +557,27 @@ export class VoiceAssistantUI {
       this._setState(STATES.THINKING);
     });
 
+    // Streaming TTS: each sentence chunk arrives individually for lower latency
+    this.ws.on('voice_audio_chunk', (data) => {
+      console.log('[VoiceUI] voice_audio_chunk:', data.index + 1, '/', data.total);
+      if (data.audioUrl) {
+        this._setState(STATES.SPEAKING);
+        this.audio.speak(data.audioUrl);
+      }
+    });
+
     this.ws.on('voice_response', (data) => {
       console.log('[VoiceUI] voice_response:', JSON.stringify(data).slice(0, 200));
       if (data.audioUrl) {
-        // TTS audio was generated — play it; onPlaybackEnd will return to LISTENING
+        // Single-WAV response (short text or fallback) — play it
         this._setState(STATES.SPEAKING);
         this.audio.speak(data.audioUrl);
-      } else if (data.text) {
-        // Text-only response (no audio) — display and return to listening immediately
+      } else if (data.text && this.state !== STATES.SPEAKING) {
+        // Text-only response with no audio (and no streaming chunks playing)
         this.statusBar?.setActivity(data.text);
         this._setState(STATES.LISTENING);
       }
+      // If audioUrl is null and state is SPEAKING, streaming chunks are playing — do nothing
     });
 
     this.ws.on('voice_done', () => {

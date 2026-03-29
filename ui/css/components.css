@@ -1210,6 +1210,115 @@
   text-transform: uppercase;
 }
 
+/* ── Live Dashboard Widgets ── */
+.dash-widgets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.dash-widget {
+  background: #0a0a1a;
+  border: 1px solid #1a1a3a;
+  border-left: 3px solid var(--lcars-orange);
+  border-radius: 4px;
+  padding: 10px 14px;
+  transition: border-color 0.3s;
+}
+
+.dash-widget-weather { border-left-color: var(--lcars-light-blue); }
+.dash-widget-calendar { border-left-color: var(--lcars-gold); }
+.dash-widget-timers { border-left-color: var(--lcars-blue); }
+
+.dash-widget-title {
+  font-family: var(--lcars-font);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--lcars-lavender);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dash-widget-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lcars-orange);
+  flex-shrink: 0;
+  animation: widget-pulse 3s ease-in-out infinite;
+}
+
+@keyframes widget-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.dash-widget-body {
+  font-family: var(--lcars-font);
+  font-size: 12px;
+  color: var(--lcars-text);
+  letter-spacing: 0.5px;
+}
+
+.dash-widget-loading {
+  color: var(--lcars-text-dim);
+  font-style: italic;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.dash-widget-dim {
+  color: var(--lcars-text-dim);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.dash-widget-row {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  align-items: baseline;
+}
+
+.dash-widget-label {
+  color: var(--lcars-text-dim);
+  min-width: 52px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.dash-widget-value {
+  color: var(--lcars-peach);
+  font-size: 12px;
+}
+
+.dash-widget-weather-hero .dash-widget-label {
+  color: var(--lcars-light-blue);
+  font-size: 18px;
+  font-weight: 700;
+  min-width: auto;
+  text-transform: none;
+}
+
+.dash-widget-weather-hero .dash-widget-value {
+  color: var(--lcars-text);
+  font-size: 13px;
+}
+
+.dash-widget-timer-urgent .dash-widget-label {
+  color: var(--lcars-red);
+  font-weight: 700;
+  animation: pulse 1s infinite;
+}
+
 /* ── Knowledge Panel ── */
 .knowledge-controls {
   margin-bottom: 12px;
