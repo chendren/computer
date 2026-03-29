@@ -349,7 +349,7 @@ async function _webSearchAndRead(query, numResults = 3) {
 // ── Smart Chart Executor ──────────────────────────────────
 
 const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';
-const VOICE_MODEL = process.env.VOICE_MODEL || 'llama4:scout';
+const VOICE_MODEL = process.env.VOICE_MODEL || 'llama3.1:8b';
 
 const METAL_SYMBOLS = { gold: 'XAU', silver: 'XAG', platinum: 'XPT', palladium: 'XPD' };
 const TICKER_MAP = {
