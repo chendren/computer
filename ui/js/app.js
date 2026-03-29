@@ -147,11 +147,12 @@ class ComputerApp {
     this.ws.on('telegram_message', (data) => {
       const from = data.from || 'Unknown';
       const text = data.text || '';
-      // Speak with "Captain, alert" prefix
-      const spokenMsg = `Captain, alert. Incoming message from ${from}. ${text.slice(0, 200)}`;
-      this._speak(spokenMsg);
-      // Show center popup
+      console.log('[app] Telegram message from', from, ':', text.slice(0, 100));
+      // Show center popup immediately
       this._showTelegramPopup(from, text, data.username);
+      // Speak with "Captain, alert" prefix — truncate message for TTS
+      const spokenMsg = `Captain, alert. Incoming message from ${from}. ${text.slice(0, 150)}`;
+      this._speak(spokenMsg);
     });
 
     // Alert status — visual overlay for red/yellow/blue alert
@@ -276,18 +277,24 @@ class ComputerApp {
 
   async _speak(text) {
     try {
+      // TTS endpoint has 500 char limit — truncate if needed
+      const truncated = text.length > 450 ? text.slice(0, 447) + '...' : text;
       const headers = { 'Content-Type': 'application/json' };
       if (this.authToken) headers['Authorization'] = `Bearer ${this.authToken}`;
       const res = await fetch('/api/tts/speak', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text: truncated }),
       });
       const result = await res.json();
       if (result.audioUrl) {
         this.audio.speak(result.audioUrl);
+      } else {
+        console.error('[app] TTS returned no audioUrl:', result);
       }
-    } catch {}
+    } catch (err) {
+      console.error('[app] TTS _speak failed:', err.message);
+    }
   }
 
   _showTelegramPopup(from, text, username) {
