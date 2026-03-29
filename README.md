@@ -7,7 +7,7 @@ A Claude Code plugin that turns your machine into the USS Enterprise main comput
 ![Node.js](https://img.shields.io/badge/Node.js-Express%20%2B%20WebSocket-9999FF?style=flat-square&labelColor=000000)
 ![LanceDB](https://img.shields.io/badge/Vector%20DB-LanceDB-55CC55?style=flat-square&labelColor=000000)
 ![Voice](https://img.shields.io/badge/Voice-Voxtral%20STT%20%2B%20Kokoro%20TTS-33CCFF?style=flat-square&labelColor=000000)
-![Ollama](https://img.shields.io/badge/LLM-Llama%203.1%20%2B%20Groq%20Tool%20Use%20via%20Ollama-66CCFF?style=flat-square&labelColor=000000)
+![Ollama](https://img.shields.io/badge/LLM-Llama%203.1%208B%20via%20Ollama-66CCFF?style=flat-square&labelColor=000000)
 ![Self-Contained](https://img.shields.io/badge/Mode-100%25%20Local-55CC55?style=flat-square&labelColor=000000)
 
 ---
@@ -19,7 +19,7 @@ A Claude Code plugin that turns your machine into the USS Enterprise main comput
 - [What Can It Do?](#what-can-it-do)
 - [How It Works](#how-it-works)
   - [The Voice Pipeline](#the-voice-pipeline)
-  - [The Dual-Model Brain](#the-dual-model-brain)
+  - [The Single-Model Brain](#the-single-model-brain)
   - [The LCARS Interface](#the-lcars-interface)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
@@ -30,7 +30,8 @@ A Claude Code plugin that turns your machine into the USS Enterprise main comput
   - [4. Set Up Voxtral STT (Recommended)](#4-set-up-voxtral-stt-recommended)
   - [5. Register as a Claude Code Plugin](#5-register-as-a-claude-code-plugin)
   - [6. Set Up Gmail (Optional)](#6-set-up-gmail-optional)
-  - [7. Start and Verify](#7-start-and-verify)
+  - [7. Set Up Telegram (Optional)](#7-set-up-telegram-optional)
+  - [8. Start and Verify](#8-start-and-verify)
 - [Voice Interaction Guide](#voice-interaction-guide)
   - [Computer Mode -- Tool Commands](#computer-mode--tool-commands)
   - [Moshi Mode -- Natural Conversation (Optional)](#moshi-mode--natural-conversation-optional)
@@ -53,11 +54,13 @@ A Claude Code plugin that turns your machine into the USS Enterprise main comput
 
 Computer is a self-contained AI assistant styled after the USS Enterprise computer from Star Trek. It runs as a Claude Code plugin -- meaning it auto-starts when you open a Claude Code session and integrates directly with your AI workflow.
 
-You interact with it two ways:
+You interact with it three ways:
 
-1. **Voice** -- Click the diamond button in the browser UI, speak naturally. The system listens, understands, acts, and speaks back. Say "Computer, what's the gold price?" and it will fetch the actual price from Yahoo Finance, synthesize an answer, and speak it to you -- all within 1-2 seconds.
+1. **Voice** -- Click the diamond button (or enable always-on mode), speak naturally. The system listens, understands, acts, and speaks back. Say "Computer, what's the gold price?" and it will fetch the actual price from Yahoo Finance, synthesize an answer, and speak it to you -- all within 1-2 seconds. Keyboard shortcut: F5 or Space to toggle.
 
-2. **Slash commands** -- Type `/computer:analyze`, `/computer:search`, `/computer:know` etc. directly in your Claude Code session. Results appear both in the terminal and are pushed to the LCARS browser interface in real-time.
+2. **Text command bar** -- Type commands into the `COMPUTER>` prompt at the bottom of the LCARS interface. Same 50 tools as voice, no microphone needed.
+
+3. **Slash commands** -- Type `/computer:analyze`, `/computer:search`, `/computer:know` etc. directly in your Claude Code session. Results appear both in the terminal and are pushed to the LCARS browser interface in real-time.
 
 Everything runs on your own machine. No cloud voice APIs required (though optional cloud S2S providers are available), no external AI services, no usage costs beyond your hardware.
 
@@ -72,10 +75,10 @@ Everything runs on your own machine. No cloud voice APIs required (though option
 **The approach:**
 - **Local STT via Voxtral** -- Mistral's Voxtral Mini 3B runs as a local Python sidecar on port 8997 via mlx-audio, fully accelerated on Apple Silicon Metal GPU. Fast, accurate transcription with no cloud dependency.
 - **Local TTS via Kokoro** -- Kokoro 82M runs in-process as a Node.js ONNX model via kokoro-js. 15 voices, ~92MB model, zero-latency startup. No Python subprocess needed.
-- **Tool-augmented commands via "Computer"** -- When you say "Computer," you want action, not just conversation. A wake word triggers a switch to a dual-model tool pipeline: llama3-groq-tool-use:8b routes to tools (web search, charts, email, etc.), llama3.1:8b generates the spoken response. Full agentic capabilities triggered by voice.
-- **Local LLMs only** -- Ollama runs llama3.1:8b and llama3-groq-tool-use:8b entirely on your hardware. No API keys, no per-token cost, no data leaving your network.
+- **Tool-augmented commands via "Computer"** -- When you say "Computer," you want action, not just conversation. A wake word triggers a single-model tool pipeline: llama3.1:8b handles both tool routing (via OpenAI-compatible tool_calls) and response generation. 50 voice tools cover web search, charts, email, calendar, Telegram, ambient sounds, and more. Full agentic capabilities triggered by voice.
+- **Local LLMs only** -- Ollama runs llama3.1:8b entirely on your hardware. No API keys, no per-token cost, no data leaving your network.
 - **Optional cloud S2S** -- Gemini Live, OpenAI Realtime, and Amazon Nova Sonic are available as additional voice modes for users who want cloud-powered speech-to-speech conversation.
-- **LCARS for real** -- Not just aesthetic. The 19-panel interface is a functional dashboard: live charts, email threads, knowledge base, monitoring, and more -- all pushed in real-time via WebSocket as the AI completes work.
+- **LCARS for real** -- Not just aesthetic. The 19-panel interface is a functional dashboard: live charts, email threads, knowledge base, monitoring, quick action buttons, text command bar, always-on wake word toggle, and more -- all pushed in real-time via WebSocket as the AI completes work.
 
 ---
 
@@ -100,7 +103,8 @@ Everything runs on your own machine. No cloud voice APIs required (though option
 - **Smart charts** -- Natural language to Chart.js visualization with historical price data from Yahoo Finance API. "Computer, show me Tesla vs Apple stock this month" -> line chart with actual historical prices
 - **Email** -- Check inbox, read emails, send replies, get follow-up summaries. "Computer, summarize my inbox"
 - **Knowledge base** -- Semantic search over stored facts. "Computer, what do we know about the project timeline?"
-- **Captain's log** -- Timestamped log entries with stardates. "Computer, log: mission briefing completed"
+- **Captain's log** -- Dictation with automatic LLM analysis (summary, sentiment, topics), action detection (email, calendar, reminders), and confirmation flow ("Shall I proceed?" / "Make it so"). "Computer, captain's log: mission briefing completed, need to email Admiral about status"
+- **Telegram** -- Send and receive Telegram messages via @chadcomputerbot. Incoming messages appear as popups with TTS ("Captain, alert..."). Chat ID auto-learned. "Computer, send a Telegram to [contact]"
 - **System control** -- Panel switching, alerts, reminders, monitoring. "Computer, red alert" / "Computer, show me the charts panel"
 - **AI analysis** -- Sentiment, topics, entities, action items from text
 - **Reminders** -- "Computer, remind me in 30 minutes to check the build"
@@ -112,6 +116,7 @@ Everything runs on your own machine. No cloud voice APIs required (though option
 - **Document analysis** -- Upload PDF/TXT/MD files for AI analysis. "Computer, analyze this document"
 - **Ambient sounds** -- Procedural ambient audio (bridge, engineering, space) via Web Audio API. "Computer, play bridge ambience"
 - **Unit conversion** -- 27 unit types integrated into the calculate tool. "Computer, convert 100 miles to kilometers"
+- **Bookmarks** -- Save and list URL bookmarks. "Computer, bookmark https://example.com"
 
 ### Data Visualization
 - Natural language chart requests ("bar chart of population by country")
@@ -131,6 +136,13 @@ Everything runs on your own machine. No cloud voice APIs required (though option
 - Compose and send email
 - AI-generated follow-up detection
 - All accessible by voice
+
+### Telegram Integration
+- Send and receive messages via Telegram Bot API (@chadcomputerbot)
+- Incoming messages broadcast via WebSocket as popups with TTS alerts
+- Long-polling for incoming messages in the background
+- Chat ID auto-learning -- the bot remembers contacts after first interaction
+- Voice-triggered: "Computer, send a Telegram to [contact]"
 
 ### Monitoring and Cron
 - Watch URLs, files, and processes for changes
@@ -154,8 +166,8 @@ Here is the complete path from your mouth to the computer's voice, step by step:
    -- runs as ONNX Runtime WebAssembly, entirely in-browser, no server round-trip
 4. Captured speech sent as WAV blob over WebSocket to LCARS server
 5. Voxtral STT (local MLX sidecar, port 8997) transcribes the WAV -> "what time is it"
-6. llama3-groq-tool-use:8b receives transcription
-   -- purpose-built for OpenAI-compatible tool calling, returns structured JSON
+6. llama3.1:8b receives transcription with 50 tool definitions
+   -- OpenAI-compatible tool_calls, backed by 21 keyword safety nets
 7. Tool executes locally -> {time, date, stardate}
 8. Response shortcut: no LLM needed for known-format tools -> pre-built spoken string
    "The time is 10:07 AM. Wednesday, February 18, 2026. Stardate 102.132."
@@ -187,30 +199,30 @@ Here is the complete path from your mouth to the computer's voice, step by step:
    d. Resumes Moshi mode when done
 ```
 
-#### Why Two Models Instead of One?
+#### Single-Model Architecture
 
-Routing tool calls deterministically requires a model fine-tuned for JSON function calling -- llama3-groq-tool-use:8b is purpose-built for OpenAI-compatible tool calling and is faster and more reliable at tool selection than a general-purpose LLM. llama3.1:8b handles the conversational response because it produces high-quality natural language for longer/nuanced answers. Each model does what it's best at.
+The pipeline uses a single Ollama model -- llama3.1:8b -- for both tool routing and response generation. Tool routing uses OpenAI-compatible `tool_calls` via the `/v1/chat/completions` endpoint. This simplifies deployment (one model to pull and keep loaded) while maintaining reliable tool selection through 21 keyword-based safety nets that correct any routing misses.
 
-### The Dual-Model Brain
+### The Single-Model Brain
 
 ```
 User input (text or voice)
         |
         v
    +---------------------+
-   | llama3-groq-tool-    |  <- Purpose-built for OpenAI-compatible tool calling
-   | use:8b (tool pick)   |    Fast, deterministic, returns JSON tool calls
+   | llama3.1:8b          |  <- OpenAI-compatible tool_calls for routing
+   | (tool routing)       |    Selects from 50 voice tools via structured JSON
    +----------+-----------+
               | tool_calls: [{name: "web_search_and_read", args: {...}}]
               v
    +---------------------+
-   |  Tool Executor       |  <- 46 tools: search, charts, email, knowledge, notes,
-   |  (run the tools)     |    news, ambient, reports, etc. Real data, not hallucinated
+   |  Tool Executor       |  <- 50 tools: search, charts, email, calendar, Telegram,
+   |  (run the tools)     |    knowledge, notes, ambient, reports, etc.
    +----------+-----------+
               | tool_results: [{content: "Gold price: $2,847/oz..."}]
               v
    +---------------------+
-   |  llama3.1:8b         |  <- Meta Llama 3.1 8B, runs on Ollama
+   |  llama3.1:8b         |  <- Same model, second pass
    |  (write response)    |    Generates conversational spoken response from data
    +----------+-----------+
               | "The current gold spot price is twenty-eight forty-seven per troy ounce."
@@ -218,13 +230,15 @@ User input (text or voice)
       Kokoro TTS -> WAV -> Browser
 ```
 
-Many tools bypass llama3.1:8b entirely (shortcut paths) for speed and accuracy -- `get_time`, `set_alert`, `check_email`, `generate_chart`, `create_reminder`, etc. use pre-built response templates from the tool output, avoiding any chance of the LLM hallucinating numbers or facts.
+Many tools bypass the second LLM pass entirely (shortcut paths) for speed and accuracy -- `get_time`, `set_alert`, `check_email`, `generate_chart`, `create_reminder`, etc. use pre-built response templates from the tool output, avoiding any chance of the LLM hallucinating numbers or facts.
+
+**Captain's log pipeline:** When "captain's log" is detected, the system records the dictation, runs automatic LLM analysis (summary, sentiment, topics), detects actionable items (emails to send, calendar events, reminders), and presents a confirmation prompt. Saying "Make it so" or "yes" executes the detected actions.
 
 **Conversation memory:** The pipeline maintains session history for pronoun resolution -- saying "chart that" after a search will use the previous search results as context.
 
 **Multi-step chains:** Commands like "search for X, then chart it" are split and executed sequentially through the tool pipeline.
 
-**Safety nets:** 18 keyword-based fallbacks cover all tool categories, ensuring commands route correctly even when the LLM misses the tool call.
+**Safety nets:** 21 keyword-based fallbacks cover all tool categories, ensuring commands route correctly even when the LLM misses the tool call.
 
 ### The LCARS Interface
 
@@ -238,13 +252,17 @@ The 19 panels share a common pattern: they register a WebSocket message handler 
 
 Additional UI features:
 
-- **Always-on wake word** -- AUTO/MANUAL toggle persists via localStorage. In AUTO mode, the system listens continuously for "Computer" without needing to click the diamond button.
-- **Quick action buttons** -- 8 one-click LCARS buttons across the top: TIME, WEATHER, SYSTEM, EMAIL, CALENDAR, REPORT, CONVERT, RED ALERT.
+- **Always-on wake word** -- AUTO/MANUAL toggle persists via localStorage. In AUTO mode, the system listens continuously for "Computer" without needing to click the diamond button. Auto-activates on page load when enabled.
+- **Quick action buttons** -- 8 one-click LCARS buttons in the sidebar: TIME, WEATHER, SYSTEM, EMAIL, CALENDAR, REPORT, CONVERT, RED ALERT.
 - **Text command bar** -- `COMPUTER>` prompt at the bottom of the screen. Type commands and press Enter to execute without voice.
 - **Keyboard shortcuts** -- F5 or Space toggles voice on/off.
 - **Voice suggestions overlay** -- "Try saying..." panel appears when listening, auto-dismisses after a few seconds.
+- **Dashboard widgets** -- Live system stats, weather, calendar, and timer countdown displayed on the Dashboard panel.
 - **Enhanced status bar** -- Live timer countdown, voice mode indicator (CMD/Gemini/OpenAI/Nova), and connected services count.
-- **Sound effects** -- 6 Kokoro-generated audio cues (Acknowledged, Red alert, Processing, etc.) via the am_michael voice, triggered on specific events.
+- **Streaming TTS** -- Long responses are split at sentence boundaries and streamed as chunks for faster perceived response time.
+- **Sound effects** -- 6 Kokoro-generated audio cues (Acknowledged, Red/Yellow/Blue alert, Complete, Error) via the am_michael voice, triggered on specific events.
+- **Telegram popups** -- Incoming Telegram messages appear as notification popups with TTS alerts ("Captain, alert from [sender]...").
+- **Audio autoplay unlock** -- Silent WAV played on first user gesture to unlock browser autoplay policy.
 - **Voice transcript logging** -- All voice interactions auto-saved to the Transcript panel with timestamps.
 
 ---
@@ -283,27 +301,25 @@ Additional UI features:
   | port 8997          |     |                                          |
   |                    |     |  Sidebar (19 panels) + Active Panel      |
   | mlx-audio (Python) |     |  * Voice button  | CMD/Gemini/OAI/Nova  |
-  | Metal GPU accel    |     |  Status bar (live transcript)            |
-  +--------------------+     |                                          |
-                             |  Silero VAD (ONNX WASM, in-browser)     |
-  +--------------------+     +------------------------------------------+
-  | Kokoro TTS         |
-  | In-process Node.js |     +------------------------------------------+
-  | kokoro-js (ONNX)   |     | Cloud S2S Providers (optional)           |
-  | 15 voices, ~92MB   |     | +-- Gemini Live (WebSocket)              |
-  +--------------------+     | +-- OpenAI Realtime (WebSocket)          |
-                             | +-- Amazon Nova Sonic (Bedrock streaming) |
-  +--------------------+     +------------------------------------------+
-  | Moshi MLX Sidecar  |
+  | Metal GPU accel    |     |  * Quick actions  | 8 one-click buttons  |
+  +--------------------+     |  * Text command bar (COMPUTER> prompt)   |
+                             |  Status bar (live transcript)            |
+  +--------------------+     |  Silero VAD (ONNX WASM, in-browser)     |
+  | Kokoro TTS         |     +------------------------------------------+
+  | In-process Node.js |
+  | kokoro-js (ONNX)   |     +------------------------------------------+
+  | 15 voices, ~92MB   |     | Cloud S2S Providers (optional)           |
+  +--------------------+     | +-- Gemini Live (WebSocket)              |
+                             | +-- OpenAI Realtime (WebSocket)          |
+  +--------------------+     | +-- Amazon Nova Sonic (Bedrock streaming) |
+  | Moshi MLX Sidecar  |     +------------------------------------------+
   | port 8998 (opt.)   |
-  | Opus I/O at 24kHz  |
-  +--------------------+
-
-  +--------------------+
-  |  Ollama (:11434)   |
-  |  +-- llama3.1:8b           <- Conversation responses + chart parsing
-  |  +-- llama3-groq-tool-     <- Tool routing (OpenAI-compatible)
-  |  |   use:8b                |
+  | Opus I/O at 24kHz  |     +------------------------------------------+
+  +--------------------+     | Telegram Bot API (optional)              |
+                             | +-- Long-polling for incoming messages   |
+  +--------------------+     | +-- WebSocket broadcast to LCARS UI      |
+  |  Ollama (:11434)   |     +------------------------------------------+
+  |  +-- llama3.1:8b           <- Tool routing + conversation responses
   |  +-- nomic-embed-text      <- Knowledge base embeddings
   +--------------------+
 ```
@@ -325,10 +341,9 @@ Additional UI features:
 | Model | Size | Purpose | Command |
 |-------|------|---------|---------|
 | **nomic-embed-text** | 274MB | Knowledge base embeddings | `ollama pull nomic-embed-text` |
-| **llama3.1:8b** | 4.9GB | Conversation + chart parsing | `ollama pull llama3.1:8b` |
-| **llama3-groq-tool-use:8b** | 4.7GB | Tool routing | `ollama pull llama3-groq-tool-use:8b` |
+| **llama3.1:8b** | 4.9GB | Tool routing + conversation responses | `ollama pull llama3.1:8b` |
 
-> **Apple Silicon note:** llama3.1:8b and llama3-groq-tool-use:8b will run fully on the Metal GPU via Ollama. A Mac with 16GB RAM handles both simultaneously. 32GB is comfortable.
+> **Apple Silicon note:** llama3.1:8b runs fully on the Metal GPU via Ollama. A Mac with 16GB RAM handles it well. 32GB is comfortable.
 
 ### For Voxtral STT (Recommended)
 
@@ -342,6 +357,19 @@ The Voxtral model (`mlx-community/Voxtral-Mini-3B-2507-bf16`) is auto-downloaded
 ### For Kokoro TTS (Included)
 
 Kokoro TTS is installed as part of `npm install` via the `kokoro-js` npm package. The ONNX model (`onnx-community/Kokoro-82M-v1.0-ONNX`, q8 quantized, ~92MB) is auto-downloaded on first use. No additional setup required. 15 voices available (af_heart is the default). The model pre-warms on server start for zero-latency first use.
+
+### For Telegram Bot (Optional)
+
+No additional software required. Create a Telegram bot via [@BotFather](https://t.me/BotFather), then place the bot token in `data/telegram.json`:
+
+```json
+{
+  "botToken": "YOUR_BOT_TOKEN",
+  "chatIds": {}
+}
+```
+
+Chat IDs are auto-learned when users message the bot. The server starts long-polling for incoming messages on launch.
 
 ### For Moshi Voice (Optional)
 
@@ -391,14 +419,11 @@ npm install --omit=dev
 # Required: embedding model for knowledge base (~274MB, fast)
 ollama pull nomic-embed-text
 
-# Required: conversation + chart parsing model (~4.9GB)
+# Required: tool routing + conversation model (~4.9GB)
 ollama pull llama3.1:8b
-
-# Required: tool routing model (~4.7GB)
-ollama pull llama3-groq-tool-use:8b
 ```
 
-> These are large downloads. Start them and let them run. The server will work without the voice models -- you'll just get an error when you try to use voice commands.
+> llama3.1:8b is a ~5GB download. The server will work without it loaded, but voice commands will fail until Ollama has the model available.
 
 ### 4. Set Up Voxtral STT (Recommended)
 
@@ -500,7 +525,22 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
   http://localhost:3141/api/gateway/oauth/gmail/start
 ```
 
-### 7. Start and Verify
+### 7. Set Up Telegram (Optional)
+
+Create a bot via [@BotFather](https://t.me/BotFather), copy the token, and save it:
+
+```bash
+cat > ~/.claude/plugins/computer/data/telegram.json << 'EOF'
+{
+  "botToken": "YOUR_BOT_TOKEN_HERE",
+  "chatIds": {}
+}
+EOF
+```
+
+The server starts Telegram long-polling automatically on launch. Send your bot a message from Telegram -- the chat ID is auto-learned and the message appears as a popup in the LCARS UI.
+
+### 8. Start and Verify
 
 ```bash
 # Start the server manually (auto-starts with Claude Code via SessionStart hook)
@@ -521,7 +561,8 @@ Expected health response when everything is working:
   "ollama": "online",
   "vectordb": "online",
   "voxtral": { "running": true, "port": 8997 },
-  "gmail": { "connected": true, "email": "you@gmail.com" }
+  "gmail": { "connected": true, "email": "you@gmail.com" },
+  "telegram": { "connected": true, "botUsername": "chadcomputerbot" }
 }
 ```
 
@@ -535,7 +576,7 @@ Open **Chrome** and navigate to [http://localhost:3141](http://localhost:3141). 
 
 ### Computer Mode -- Tool Commands
 
-Computer mode is the default voice mode. It uses the full tool pipeline: Silero VAD -> Voxtral STT -> llama3-groq-tool-use:8b routing -> tool execution -> llama3.1:8b response -> Kokoro TTS.
+Computer mode is the default voice mode. It uses the full tool pipeline: Silero VAD -> Voxtral STT -> llama3.1:8b tool routing (50 tools, 21 safety nets) -> tool execution -> llama3.1:8b response -> Kokoro TTS (with streaming for long responses).
 
 The mode cycle is: **CMD -> Gemini -> OpenAI -> Nova -> CMD**. Click the mode indicator in the title bar to cycle through modes.
 
@@ -601,7 +642,7 @@ Use the TTS-only commands (`/computer:gemini-speak`, `/computer:openai-speak`, `
 | `Computer, remember [fact]` | Stores in vector knowledge base |
 | `Computer, what do we know about [topic]` | Semantic search of knowledge base |
 | `Computer, analyze [text]` | Sentiment, topics, entities, action items |
-| `Computer, log [note]` | Captain's log entry with stardate |
+| `Computer, log [note]` | Captain's log entry with stardate, auto-analysis, and action detection |
 | `Computer, red alert` | UI flashes red, visual/audio alert |
 | `Computer, yellow alert` | UI flashes yellow |
 | `Computer, stand down` | Returns to normal operations |
@@ -620,6 +661,11 @@ Use the TTS-only commands (`/computer:gemini-speak`, `/computer:openai-speak`, `
 | `Computer, play bridge ambience` | Procedural ambient sounds (bridge, engineering, space) |
 | `Computer, convert 100 miles to kilometers` | Unit conversion (27 unit types) |
 | `Computer, analyze this document` | PDF/TXT/MD upload + AI analysis |
+| `Computer, send a Telegram to [contact]` | Send message via Telegram bot |
+| `Computer, captain's log: [dictation]` | Log with analysis, action detection, and confirmation |
+| `Computer, make it so` / `Computer, yes` | Confirm pending actions from captain's log |
+| `Computer, bookmark https://example.com` | Save a URL bookmark |
+| `Computer, list my bookmarks` | List all saved bookmarks |
 
 ---
 
@@ -642,9 +688,9 @@ The interface is organized into three groups accessible from the sidebar.
 
 | Panel | Purpose |
 |-------|---------|
-| **Channels** | Gmail: inbox list, full thread view, compose window, OAuth authorization |
+| **Channels** | Gmail: inbox list, full thread view, compose window, OAuth authorization. Telegram: incoming message popups, send via voice |
 | **Search** | Web search results with clickable links, DuckDuckGo source |
-| **Log** | Captain's log entries with stardates, categories (personal/mission/technical) |
+| **Log** | Captain's log entries with stardates, categories (personal/mission/technical), LLM analysis (summary, sentiment, topics), and action detection |
 | **Monitor** | Active URL/file monitors, check history with status dots |
 | **Compare** | Side-by-side text comparison with similarity score and diff visualization |
 
@@ -824,7 +870,7 @@ Set these before starting the server, or in your shell profile:
 |----------|---------|---------|
 | `COMPUTER_PORT` | `3141` | Server HTTP + WebSocket port |
 | `VOICE_MODEL` | `llama3.1:8b` | Ollama model for conversation responses |
-| `ACTION_MODEL` | `llama3-groq-tool-use:8b` | Ollama model for tool routing |
+| `ACTION_MODEL` | `llama3.1:8b` | Ollama model for tool routing (same as VOICE_MODEL by default) |
 | `VISION_MODEL` | `llama3.1:8b` | Ollama model for image analysis |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
 | `MOSHI_PORT` | `8998` | Moshi sidecar WebSocket port |
@@ -988,11 +1034,10 @@ curl http://localhost:11434/api/tags
 ollama serve &
 
 # Check models are installed
-ollama list | grep -E "llama3|groq-tool|nomic"
+ollama list | grep -E "llama3|nomic"
 
 # Pull missing models
 ollama pull llama3.1:8b
-ollama pull llama3-groq-tool-use:8b
 ollama pull nomic-embed-text
 ```
 
@@ -1041,7 +1086,7 @@ The system is designed for **single-user local use** with these protections:
 | **Inbound scanning** | POST/PUT bodies scanned for API keys, tokens, passwords -- logs and rejects |
 | **Outbound redaction** | All JSON responses scanned for leaked secrets before sending to browser |
 | **Command whitelist** | Node execute endpoint only allows: `ls`, `df`, `uptime`, `whoami`, `pwd`, `date`, `ps`, `top` |
-| **Secret storage** | `.auth-token` and OAuth files in `data/` -- gitignored, 0600 permissions |
+| **Secret storage** | `.auth-token`, OAuth files, and Telegram bot token in `data/` -- gitignored, 0600 permissions |
 
 The auth token lives at `data/.auth-token` and is automatically used by:
 - The browser UI (injected into `index.html` at serve time)
@@ -1147,7 +1192,7 @@ The auth token lives at `data/.auth-token` and is automatically used by:
 |   +-- services/
 |       +-- moshi.js                   Moshi sidecar: spawn/stop + WebSocket bridge
 |       +-- voxtral-stt.js             Voxtral STT sidecar lifecycle manager
-|       +-- voice-assistant.js         Dual-model pipeline: groq-tool-use routing + llama3.1 responses
+|       +-- voice-assistant.js         Single-model pipeline: llama3.1 tool routing + responses (50 tools, 21 safety nets)
 |       +-- websocket.js               WebSocket handler: mode routing, tool executor, charts
 |       +-- gemini-live.js             Gemini Live S2S service
 |       +-- openai-realtime.js         OpenAI Realtime S2S service
@@ -1160,7 +1205,7 @@ The auth token lives at `data/.auth-token` and is automatically used by:
 |       +-- vision.js                  Ollama vision analysis (base64 image -> structured JSON)
 |       +-- node-local.js              Local machine node: camera, screen, whitelisted commands
 |       +-- cron-scheduler.js          Cron with minute granularity, persistent in data/cron.json
-|       +-- plugins.js                 Static tool/hook/plugin registry (46 tools, 4 hooks)
+|       +-- plugins.js                 Static tool/hook/plugin registry (50 tools, 4 hooks)
 |       +-- gmail.js                   Gmail API: OAuth, inbox, send, threads, AI summaries
 |       +-- vectordb.js                LanceDB connection pool
 |       +-- embeddings.js              Ollama nomic-embed-text wrapper
@@ -1173,6 +1218,8 @@ The auth token lives at `data/.auth-token` and is automatically used by:
 |       +-- notifications.js           macOS desktop notifications via osascript
 |       +-- sound-effects.js          Pre-generated Kokoro sound effect WAVs (6 cues)
 |       +-- calendar.js               Google Calendar API service
+|       +-- telegram.js               Telegram Bot API: long-polling, send/receive, chat ID learning
+|       +-- gmail-intelligence.js     AI-powered email analysis and follow-up detection
 |
 +-- ui/
 |   +-- index.html                     SPA shell: auth token injection, 19 panel HTML
@@ -1239,6 +1286,7 @@ The auth token lives at `data/.auth-token` and is automatically used by:
     +-- comparisons/                   Comparison results
     +-- cron.json                      Cron job definitions
     +-- google-oauth.json              Google OAuth credentials (add this yourself)
+    +-- telegram.json                  Telegram bot token + learned chat IDs (add this yourself)
     +-- oauth-tokens/                  Gmail access/refresh tokens
 ```
 
