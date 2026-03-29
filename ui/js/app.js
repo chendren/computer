@@ -143,6 +143,17 @@ class ComputerApp {
       else if (data.action === 'play') this.ambient.start(data.preset);
     });
 
+    // Telegram incoming message — center popup + TTS announcement
+    this.ws.on('telegram_message', (data) => {
+      const from = data.from || 'Unknown';
+      const text = data.text || '';
+      // Speak with "Captain, alert" prefix
+      const spokenMsg = `Captain, alert. Incoming message from ${from}. ${text.slice(0, 200)}`;
+      this._speak(spokenMsg);
+      // Show center popup
+      this._showTelegramPopup(from, text, data.username);
+    });
+
     // Alert status — visual overlay for red/yellow/blue alert
     this.ws.on('alert_status', (data) => {
       this._setAlertStatus(data.level, data.reason);
@@ -277,6 +288,50 @@ class ComputerApp {
         this.audio.speak(result.audioUrl);
       }
     } catch {}
+  }
+
+  _showTelegramPopup(from, text, username) {
+    // Remove existing popup if any
+    const existing = document.getElementById('telegram-popup');
+    if (existing) existing.remove();
+
+    const popup = document.createElement('div');
+    popup.id = 'telegram-popup';
+    popup.className = 'telegram-popup';
+
+    const header = document.createElement('div');
+    header.className = 'telegram-popup-header';
+    header.textContent = 'INCOMING TRANSMISSION';
+    popup.appendChild(header);
+
+    const fromDiv = document.createElement('div');
+    fromDiv.className = 'telegram-popup-from';
+    fromDiv.textContent = from + (username ? ' (@' + username + ')' : '');
+    popup.appendChild(fromDiv);
+
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'telegram-popup-text';
+    msgDiv.textContent = text;
+    popup.appendChild(msgDiv);
+
+    const channelDiv = document.createElement('div');
+    channelDiv.className = 'telegram-popup-channel';
+    channelDiv.textContent = 'TELEGRAM';
+    popup.appendChild(channelDiv);
+
+    document.body.appendChild(popup);
+
+    // Auto-dismiss after 12 seconds
+    setTimeout(() => {
+      popup.classList.add('telegram-popup-fade');
+      setTimeout(() => popup.remove(), 1000);
+    }, 12000);
+
+    // Click to dismiss
+    popup.addEventListener('click', () => {
+      popup.classList.add('telegram-popup-fade');
+      setTimeout(() => popup.remove(), 300);
+    });
   }
 
   _setAlertStatus(level, reason) {

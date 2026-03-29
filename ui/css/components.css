@@ -3745,3 +3745,58 @@ body.alert-blue .lcars-sidebar { border-color: #3366CC; }
 .log-actions { margin-top: 8px; }
 .log-actions-title { color: #FF9900; font-size: 10px; letter-spacing: 2px; margin-bottom: 4px; }
 .log-action-item { color: #CC99CC; font-size: 12px; padding: 2px 0; padding-left: 8px; border-left: 1px solid #CC99CC; margin-bottom: 2px; }
+
+/* ── Telegram Incoming Message Popup ── */
+.telegram-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.92);
+  border: 2px solid #33CCFF;
+  border-radius: 6px;
+  padding: 24px 32px;
+  max-width: 500px;
+  min-width: 320px;
+  z-index: 9999;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(51, 204, 255, 0.3), inset 0 0 20px rgba(51, 204, 255, 0.05);
+  animation: telegram-popup-in 0.3s ease-out;
+  cursor: pointer;
+}
+@keyframes telegram-popup-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.telegram-popup-fade {
+  opacity: 0;
+  transition: opacity 0.5s ease-out;
+}
+.telegram-popup-header {
+  color: #33CCFF;
+  font-family: 'Antonio', sans-serif;
+  font-size: 12px;
+  letter-spacing: 3px;
+  margin-bottom: 12px;
+}
+.telegram-popup-from {
+  color: #FF9900;
+  font-family: 'Antonio', sans-serif;
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+.telegram-popup-text {
+  color: #FFFFFF;
+  font-size: 16px;
+  line-height: 1.5;
+  margin-bottom: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.telegram-popup-channel {
+  color: #33CCFF;
+  font-family: 'Antonio', sans-serif;
+  font-size: 10px;
+  letter-spacing: 2px;
+  opacity: 0.6;
+}
