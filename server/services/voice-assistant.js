@@ -658,6 +658,28 @@ export const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'save_bookmark',
+      description: 'Bookmark a URL or the current browser page. Use when user says "bookmark this", "save this page", "bookmark", "save this URL", "add to bookmarks".',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL to bookmark (optional — uses current browser page if not specified)' },
+          title: { type: 'string', description: 'Title for the bookmark (optional)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_bookmarks',
+      description: 'List saved bookmarks. Use when user says "my bookmarks", "show bookmarks", "list bookmarks", "saved pages".',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
 ];
 
 // In-memory reminders (broadcast when due)
@@ -1149,6 +1171,17 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   if (factKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'random_fact')) {
     console.log(`[voice-ai] [action] Forcing random_fact — user request contains fact/trivia keyword`);
     actionToolCalls.push({ name: 'random_fact', arguments: {} });
+  }
+
+  // Safety net #19: bookmark routing.
+  const bookmarkKw = ['bookmark this', 'save this page', 'add to bookmarks', 'bookmark'];
+  const listBmKw = ['my bookmarks', 'show bookmarks', 'list bookmarks', 'saved pages'];
+  if (listBmKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'list_bookmarks')) {
+    console.log(`[voice-ai] [action] Forcing list_bookmarks — user request contains bookmark list keyword`);
+    actionToolCalls.push({ name: 'list_bookmarks', arguments: {} });
+  } else if (bookmarkKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'save_bookmark')) {
+    console.log(`[voice-ai] [action] Forcing save_bookmark — user request contains bookmark keyword`);
+    actionToolCalls.push({ name: 'save_bookmark', arguments: {} });
   }
 
   // Step 2: Execute action model-selected tools
@@ -1685,6 +1718,33 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     session.messages.push({ role: 'user', content: enrichedText });
     session.messages.push({ role: 'assistant', content: spokenText });
     return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // save_bookmark shortcut
+  const bookmarkResult = toolResults.find(tr => tr.tool === 'save_bookmark' && !tr.error);
+  if (bookmarkResult && bookmarkResult.result?.bookmarked) {
+    const spokenText = `Bookmarked: ${bookmarkResult.result.title}.`;
+    console.log(`[voice-ai] [bookmark-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch: 'knowledge' };
+  }
+
+  // list_bookmarks shortcut
+  const listBmResult = toolResults.find(tr => tr.tool === 'list_bookmarks' && !tr.error);
+  if (listBmResult && listBmResult.result) {
+    const bm = listBmResult.result.bookmarks || [];
+    let spokenText;
+    if (bm.length === 0) {
+      spokenText = 'No bookmarks saved.';
+    } else {
+      spokenText = `${bm.length} bookmark${bm.length > 1 ? 's' : ''}. `;
+      spokenText += bm.slice(0, 3).map(b => b.title || 'Untitled').join('. ') + '.';
+    }
+    console.log(`[voice-ai] [bookmark-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch: 'knowledge' };
   }
 
   // For all other tools, ask the response model to generate a spoken answer.

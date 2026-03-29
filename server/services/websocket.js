@@ -1660,6 +1660,28 @@ function createToolExecutor(baseUrl, ws) {
         const fact = (factData.choices?.[0]?.message?.content || '').trim();
         return { fact, topic: topic || 'random' };
       }
+      case 'save_bookmark': {
+        const url = input.url || '';
+        const title = input.title || url || 'Untitled bookmark';
+        if (!url) return { error: 'No URL provided. Say "bookmark" while viewing a page, or specify a URL.' };
+        const res = await fetch(`${baseUrl}/api/knowledge`, {
+          method: 'POST', headers: authHeaders(),
+          body: JSON.stringify({ text: `Bookmark: ${title}\nURL: ${url}`, title: title, tags: ['bookmark'], source: 'voice-bookmark' }),
+        });
+        return { ...(await res.json()), url, title, bookmarked: true };
+      }
+      case 'list_bookmarks': {
+        const res = await fetch(`${baseUrl}/api/knowledge/search`, {
+          method: 'POST', headers: authHeaders(),
+          body: JSON.stringify({ query: 'bookmark', limit: 10, method: 'keyword' }),
+        });
+        const data = await res.json();
+        const bookmarks = (data.results || []).filter(r => {
+          const tags = r.tags || [];
+          return tags.includes('bookmark') || (r.source && r.source === 'voice-bookmark');
+        });
+        return { bookmarks: bookmarks.slice(0, 10), count: bookmarks.length };
+      }
       default:
         return { error: `Unknown tool: ${toolName}` };
     }
