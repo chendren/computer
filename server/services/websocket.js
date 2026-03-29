@@ -1470,7 +1470,7 @@ Log entry: ${logText}`;
           broadcast('alert_status', { level: 'blue', reason: msg });
           broadcast('status', { message: msg });
           try {
-            const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text: msg }) });
+            const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text: msg, voice: 'am_michael' }) });
             const ttsData = await ttsRes.json();
             if (ttsData.audioUrl) broadcast('play_sound', { url: ttsData.audioUrl });
           } catch {}
@@ -1900,7 +1900,7 @@ Log entry: ${logText}`;
           broadcast('alert_status', { level: 'blue', reason: msg });
           broadcast('status', { message: msg });
           try {
-            const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text: msg }) });
+            const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text: msg, voice: 'am_michael' }) });
             const ttsData = await ttsRes.json();
             if (ttsData.audioUrl) broadcast('play_sound', { url: ttsData.audioUrl });
           } catch {}
@@ -1960,8 +1960,24 @@ Log entry: ${logText}`;
         }
         return { publicIP, localIP, hostname };
       }
-      default:
+      default: {
+        const { getDynamicTools } = await import('./voice-assistant.js');
+        const dynTool = getDynamicTools().find(t => t.function.name === toolName);
+        if (dynTool && dynTool._handler_url) {
+          try {
+            const dynRes = await fetch(dynTool._handler_url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tool: toolName, input }),
+              signal: AbortSignal.timeout(15000),
+            });
+            return await dynRes.json();
+          } catch (err) {
+            return { error: `Plugin tool '${toolName}' failed: ${err.message}` };
+          }
+        }
         return { error: `Unknown tool: ${toolName}` };
+      }
     }
     } catch (err) {
       console.error(`[ws] Tool executor error (${toolName}):`, err.message);
@@ -2032,6 +2048,14 @@ async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
       sendTo(ws, 'voice_panel_switch', { panel: result.panelSwitch });
     }
 
+    // Select voice based on context — different tools get different voices
+    let ttsVoice = 'af_heart'; // default
+    const toolNames = (result.toolsUsed || []);
+    if (toolNames.includes('set_alert')) ttsVoice = 'am_michael';
+    else if (toolNames.includes('system_info') || toolNames.includes('git_status') || toolNames.includes('network_info')) ttsVoice = 'am_adam';
+    else if (toolNames.includes('get_news') || toolNames.includes('meeting_prep') || toolNames.includes('daily_standup') || toolNames.includes('generate_report')) ttsVoice = 'bf_emma';
+    console.log(`[ws] TTS voice selected: ${ttsVoice} (tools: [${toolNames.join(', ')}])`);
+
     // Generate TTS for the response
     let audioUrl = null;
     let streamed = false;
@@ -2043,7 +2067,7 @@ async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
           const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, {
             method: 'POST',
             headers: authHeaders(),
-            body: JSON.stringify({ text: result.text }),
+            body: JSON.stringify({ text: result.text, voice: ttsVoice }),
           });
           const ttsData = await ttsRes.json();
           audioUrl = ttsData.audioUrl || null;
@@ -2063,7 +2087,7 @@ async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
             const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, {
               method: 'POST',
               headers: authHeaders(),
-              body: JSON.stringify({ text: sentence }),
+              body: JSON.stringify({ text: sentence, voice: ttsVoice }),
             });
             const ttsData = await ttsRes.json();
             if (ttsData.audioUrl) {
@@ -2089,7 +2113,7 @@ async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
             const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, {
               method: 'POST',
               headers: authHeaders(),
-              body: JSON.stringify({ text: result.text }),
+              body: JSON.stringify({ text: result.text, voice: ttsVoice }),
             });
             const ttsData = await ttsRes.json();
             audioUrl = ttsData.audioUrl || null;

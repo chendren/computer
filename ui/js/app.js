@@ -152,7 +152,7 @@ class ComputerApp {
       this._showTelegramPopup(from, text, data.username);
       // Speak with "Captain, alert" prefix — truncate message for TTS
       const spokenMsg = `Captain, alert. Incoming message from ${from}. ${text.slice(0, 150)}`;
-      this._speak(spokenMsg);
+      this._speak(spokenMsg, 'am_michael');
     });
 
     // Alert status — visual overlay for red/yellow/blue alert
@@ -275,7 +275,7 @@ class ComputerApp {
     this.ws.connect();
   }
 
-  async _speak(text) {
+  async _speak(text, voice) {
     try {
       // TTS endpoint has 500 char limit — truncate if needed
       const truncated = text.length > 450 ? text.slice(0, 447) + '...' : text;
@@ -284,7 +284,7 @@ class ComputerApp {
       const res = await fetch('/api/tts/speak', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ text: truncated }),
+        body: JSON.stringify({ text: truncated, voice }),
       });
       const result = await res.json();
       if (result.audioUrl) {
