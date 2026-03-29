@@ -25,12 +25,33 @@ export class AudioPlayer {
     this.enabled = true;       // global mute toggle
     this.currentAudio = null;  // the currently playing HTMLAudioElement
     this.onPlaybackEnd = null; // callback fired when the entire queue drains
+    this._audioUnlocked = false; // true after first user interaction unlocks autoplay
 
     // ── Moshi streaming state ────────────────────────────────────────────
     this._audioCtx = null;       // Web Audio API context at 24kHz
     this._opusDecoder = null;    // WebCodecs AudioDecoder for Opus → PCM
     this._moshiActive = false;   // true while streaming is initialized
     this._nextPlayTime = 0;      // AudioContext timestamp for seamless scheduling
+
+    // Unlock audio on first user interaction (Chrome autoplay policy)
+    this._unlockAudio();
+  }
+
+  _unlockAudio() {
+    const unlock = () => {
+      if (this._audioUnlocked) return;
+      // Create and play a silent audio buffer to unlock the audio context
+      const silentAudio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
+      silentAudio.volume = 0;
+      silentAudio.play().then(() => {
+        this._audioUnlocked = true;
+        console.log('[AudioPlayer] Audio unlocked by user gesture');
+        silentAudio.remove();
+      }).catch(() => {});
+    };
+    document.addEventListener('click', unlock, { once: false });
+    document.addEventListener('keydown', unlock, { once: false });
+    document.addEventListener('touchstart', unlock, { once: false });
   }
 
   /**
@@ -77,8 +98,8 @@ export class AudioPlayer {
       this.currentAudio = null;
       this._playNext();
     };
-    this.currentAudio.play().catch(() => {
-      // play() can reject if the browser blocks autoplay — skip and continue
+    this.currentAudio.play().catch((err) => {
+      console.warn('[AudioPlayer] play() blocked:', err.message, '— url:', url);
       this.currentAudio = null;
       this._playNext();
     });
