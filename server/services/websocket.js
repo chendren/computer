@@ -2381,18 +2381,20 @@ export function initWebSocket(wss, baseUrl) {
             break;
           }
           case 'voice_start':
-            console.log('[ws] voice_start received');
-            // Auto-connect to Moshi if available
-            isMoshiRunning().then(running => {
-              if (running) {
-                connectMoshiBridge(ws, state, baseUrl, sessionId).then(ok => {
-                  if (ok) {
-                    state.voiceMode = 'moshi';
-                    sendTo(ws, 'voice_mode_changed', { mode: 'moshi' });
-                  }
-                });
-              }
-            });
+            console.log('[ws] voice_start received, client mode:', state.voiceMode || 'computer');
+            // Only connect Moshi bridge if client is in moshi mode
+            if (state.voiceMode === 'moshi') {
+              isMoshiRunning().then(running => {
+                if (running) {
+                  connectMoshiBridge(ws, state, baseUrl, sessionId).then(ok => {
+                    if (ok) sendTo(ws, 'voice_mode_changed', { mode: 'moshi' });
+                  });
+                }
+              });
+            } else {
+              // Computer mode — just acknowledge, VAD + STT handle the rest client-side
+              sendTo(ws, 'voice_mode_changed', { mode: state.voiceMode || 'computer' });
+            }
             sendTo(ws, 'status', { message: 'Voice assistant active' });
             break;
           case 'gemini_activity':
