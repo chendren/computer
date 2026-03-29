@@ -58,18 +58,28 @@ class ComputerApp {
     // Voice assistant (always-listening, wake word "Computer")
     this.voiceAssistant = new VoiceAssistantUI(this.ws, this.audio, this.statusBar);
 
-    // WebSocket handlers — auto-switch to relevant panel on data push
+    // WebSocket handlers — auto-switch to relevant panel on data push.
+    // During voice interaction, only voice_panel_switch controls the active panel
+    // (prevents background monitor/cron events from yanking focus away from charts).
+    this._voiceLockPanel = false;
+
+    this.ws.on('voice_panel_switch', () => {
+      // voice_panel_switch sets a lock — hold this panel during voice playback
+      this._voiceLockPanel = true;
+    });
+    this.ws.on('voice_done', () => {
+      this._voiceLockPanel = false;
+    });
+
     this.ws.on('transcript', (data) => {
       this.transcript.addEntry(data);
-      this.switchPanel('transcript');
+      if (!this._voiceLockPanel) this.switchPanel('transcript');
     });
 
     this.ws.on('analysis', (data) => {
       this.analysis.display(data);
-      this.switchPanel('analysis');
-      if (data.chartSpec) {
-        this.charts.render(data.chartSpec);
-      }
+      if (!this._voiceLockPanel) this.switchPanel('analysis');
+      if (data.chartSpec) this.charts.render(data.chartSpec);
     });
 
     this.ws.on('chart', (data) => {
@@ -79,30 +89,28 @@ class ComputerApp {
 
     this.ws.on('search', (data) => {
       this.search.display(data);
-      this.switchPanel('search');
+      if (!this._voiceLockPanel) this.switchPanel('search');
     });
 
     this.ws.on('log', (data) => {
       this.log.addEntry(data);
-      this.switchPanel('log');
+      if (!this._voiceLockPanel) this.switchPanel('log');
     });
 
     this.ws.on('monitor', (data) => {
       this.monitor.display(data);
-      this.switchPanel('monitor');
+      // Never auto-switch to monitor — background poller fires constantly
     });
 
     this.ws.on('comparison', (data) => {
       this.comparison.display(data);
-      this.switchPanel('compare');
-      if (data.chartSpec) {
-        this.charts.render(data.chartSpec);
-      }
+      if (!this._voiceLockPanel) this.switchPanel('compare');
+      if (data.chartSpec) this.charts.render(data.chartSpec);
     });
 
     this.ws.on('knowledge', (data) => {
       this.knowledge.addEntry(data);
-      this.switchPanel('knowledge');
+      if (!this._voiceLockPanel) this.switchPanel('knowledge');
     });
 
     // Alert status — visual overlay for red/yellow/blue alert
