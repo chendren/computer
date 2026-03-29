@@ -716,6 +716,69 @@ export const TOOLS = [
       parameters: { type: 'object', properties: {} },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'meeting_prep',
+      description: 'Prepare a briefing for an upcoming meeting. Use when user says "prep me for", "meeting prep", "prepare for my meeting", "brief me on my next meeting", "get ready for".',
+      parameters: {
+        type: 'object',
+        properties: {
+          meeting: { type: 'string', description: 'Meeting name or time (optional — defaults to next upcoming meeting)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'focus_mode',
+      description: 'Start a focus/deep work session with timer. Use when user says "focus mode", "deep work", "pomodoro", "do not disturb", "focus for".',
+      parameters: {
+        type: 'object',
+        properties: {
+          duration_minutes: { type: 'number', description: 'Focus duration in minutes (default 25 for pomodoro)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'clipboard_summarize',
+      description: 'Read and summarize clipboard contents. Use when user says "summarize my clipboard", "summarize clipboard", "what\'s on my clipboard and summarize it", "tldr clipboard".',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_status',
+      description: 'Get git repository status. Use when user says "git status", "project status", "what branch am I on", "uncommitted changes", "recent commits".',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Repository path (optional, defaults to home directory)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'network_info',
+      description: 'Get network information: IP address, hostname. Use when user says "what\'s my IP", "my IP address", "network info", "hostname".',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'daily_standup',
+      description: 'Generate daily standup notes. Use when user says "standup", "daily standup", "standup notes", "what did I do yesterday", "standup report".',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
 ];
 
 // In-memory reminders (broadcast when due)
@@ -1274,6 +1337,48 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   if (storeKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'store_knowledge')) {
     console.log(`[voice-ai] [action] Forcing store_knowledge — user request contains store keyword`);
     actionToolCalls.push({ name: 'store_knowledge', arguments: { text: userText } });
+  }
+
+  // Safety net #23: meeting prep routing.
+  const prepKw = ['prep me for', 'meeting prep', 'prepare for my meeting', 'brief me on', 'get ready for my meeting'];
+  if (prepKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'meeting_prep')) {
+    console.log(`[voice-ai] [action] Forcing meeting_prep — user request contains meeting prep keyword`);
+    actionToolCalls.push({ name: 'meeting_prep', arguments: {} });
+  }
+
+  // Safety net #24: focus mode routing.
+  const focusKw = ['focus mode', 'deep work', 'pomodoro', 'do not disturb', 'focus for'];
+  if (focusKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'focus_mode')) {
+    console.log(`[voice-ai] [action] Forcing focus_mode — user request contains focus keyword`);
+    actionToolCalls.push({ name: 'focus_mode', arguments: {} });
+  }
+
+  // Safety net #25: clipboard summarize routing.
+  const clipSumKw = ['summarize my clipboard', 'summarize clipboard', 'tldr clipboard'];
+  if (clipSumKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'clipboard_summarize')) {
+    console.log(`[voice-ai] [action] Forcing clipboard_summarize — user request contains clipboard summarize keyword`);
+    actionToolCalls.push({ name: 'clipboard_summarize', arguments: {} });
+  }
+
+  // Safety net #26: git status routing.
+  const gitKw = ['git status', 'project status', 'what branch'];
+  if (gitKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'git_status')) {
+    console.log(`[voice-ai] [action] Forcing git_status — user request contains git keyword`);
+    actionToolCalls.push({ name: 'git_status', arguments: {} });
+  }
+
+  // Safety net #27: network info routing.
+  const netKw = ["what's my ip", 'my ip address', 'network info'];
+  if (netKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'network_info')) {
+    console.log(`[voice-ai] [action] Forcing network_info — user request contains network keyword`);
+    actionToolCalls.push({ name: 'network_info', arguments: {} });
+  }
+
+  // Safety net #28: daily standup routing.
+  const standupKw = ['standup', 'daily standup', 'standup notes', 'standup report', 'what did i do yesterday'];
+  if (standupKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'daily_standup')) {
+    console.log(`[voice-ai] [action] Forcing daily_standup — user request contains standup keyword`);
+    actionToolCalls.push({ name: 'daily_standup', arguments: {} });
   }
 
   // (captain's log + confirm_actions safety nets moved to top — see Safety net #0)
@@ -1932,6 +2037,92 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     session.messages.push({ role: 'user', content: enrichedText });
     session.messages.push({ role: 'assistant', content: spokenText });
     return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // meeting_prep shortcut — speak briefing directly
+  const prepResult = toolResults.find(tr => tr.tool === 'meeting_prep' && !tr.error);
+  if (prepResult && prepResult.result?.meeting) {
+    const m = prepResult.result.meeting;
+    let spokenText = `Meeting briefing. ${m.summary} at ${m.startTime}.`;
+    if (m.location) spokenText += ` Location: ${m.location}.`;
+    if (prepResult.result.relatedEmails !== 'None found') {
+      spokenText += ` Related emails: ${prepResult.result.relatedEmails.slice(0, 100)}.`;
+    }
+    if (prepResult.result.knowledgeBase !== 'No related entries') {
+      spokenText += ` From knowledge base: ${prepResult.result.knowledgeBase.slice(0, 100)}.`;
+    }
+    if (spokenText.length > 400) spokenText = spokenText.slice(0, 397) + '...';
+    console.log(`[voice-ai] [meeting-prep-shortcut] Spoken: "${spokenText.slice(0, 200)}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // focus_mode shortcut
+  const focusResult = toolResults.find(tr => tr.tool === 'focus_mode' && !tr.error);
+  if (focusResult && focusResult.result) {
+    const spokenText = `Focus mode activated. ${focusResult.result.duration} minute session.`;
+    console.log(`[voice-ai] [focus-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // clipboard_summarize shortcut — speak the summary directly
+  const clipSumResult = toolResults.find(tr => tr.tool === 'clipboard_summarize' && !tr.error);
+  if (clipSumResult && clipSumResult.result?.summary) {
+    const spokenText = clipSumResult.result.summary;
+    console.log(`[voice-ai] [clipboard-summarize-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // git_status shortcut
+  const gitResult = toolResults.find(tr => tr.tool === 'git_status' && !tr.error);
+  if (gitResult && gitResult.result && !gitResult.result.error) {
+    const r = gitResult.result;
+    const lastCommit = (r.recentCommits && r.recentCommits.length > 0) ? r.recentCommits[0] : '';
+    const commitMsg = lastCommit ? lastCommit.split(' ').slice(1).join(' ') : 'none';
+    const spokenText = `Branch: ${r.branch}. ${r.changes} uncommitted change${r.changes !== 1 ? 's' : ''}. Last commit: ${commitMsg}.`;
+    console.log(`[voice-ai] [git-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // network_info shortcut
+  const netResult = toolResults.find(tr => tr.tool === 'network_info' && !tr.error);
+  if (netResult && netResult.result) {
+    const r = netResult.result;
+    const spokenText = `Public IP: ${r.publicIP}. Local IP: ${r.localIP}. Hostname: ${r.hostname}.`;
+    console.log(`[voice-ai] [network-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // daily_standup shortcut — speak standup summary directly
+  const standupResult = toolResults.find(tr => tr.tool === 'daily_standup' && !tr.error);
+  if (standupResult && standupResult.result) {
+    const s = standupResult.result;
+    let spokenText = 'Standup report. ';
+    if (s.yesterday.logCount > 0) {
+      spokenText += `Yesterday: ${s.yesterday.logCount} log entries. ${s.yesterday.logs.slice(0, 2).join('. ')}. `;
+    } else {
+      spokenText += 'No activity logged yesterday. ';
+    }
+    if (s.today.eventCount > 0) {
+      spokenText += `Today: ${s.today.eventCount} event${s.today.eventCount > 1 ? 's' : ''}. `;
+      spokenText += s.today.events.slice(0, 3).map(e => e.summary + ' at ' + e.time).join('. ') + '.';
+    } else {
+      spokenText += 'No events scheduled today.';
+    }
+    if (spokenText.length > 400) spokenText = spokenText.slice(0, 397) + '...';
+    console.log(`[voice-ai] [standup-shortcut] Spoken: "${spokenText.slice(0, 200)}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch: 'compare' };
   }
 
   // For all other tools, ask the response model to generate a spoken answer.

@@ -1774,6 +1774,192 @@ Log entry: ${logText}`;
         });
         return { bookmarks: bookmarks.slice(0, 10), count: bookmarks.length };
       }
+      case 'meeting_prep': {
+        let events = [];
+        try {
+          const now = new Date();
+          const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
+          events = await calendar.listEvents(now.toISOString(), endOfDay.toISOString());
+        } catch {}
+
+        if (events.length === 0) return { error: 'No upcoming meetings found today. Is Google Calendar connected?' };
+
+        let meeting = events[0];
+        if (input.meeting) {
+          const target = input.meeting.toLowerCase();
+          const match = events.find(e => e.summary.toLowerCase().includes(target));
+          if (match) meeting = match;
+        }
+
+        let emailContext = '';
+        try {
+          const emailRes = await fetch(baseUrl + '/api/gmail/search?q=' + encodeURIComponent(meeting.summary), { headers: authHeaders() });
+          const emailData = await emailRes.json();
+          const msgs = (emailData.messages || []).slice(0, 3);
+          if (msgs.length > 0) {
+            emailContext = msgs.map(m => {
+              const from = (m.from || '').split('<')[0].trim();
+              return from + ': ' + (m.subject || '');
+            }).join('. ');
+          }
+        } catch {}
+
+        let kbContext = '';
+        try {
+          const kbRes = await fetch(`${baseUrl}/api/knowledge/search`, {
+            method: 'POST', headers: authHeaders(),
+            body: JSON.stringify({ query: meeting.summary, limit: 3 }),
+          });
+          const kbData = await kbRes.json();
+          const results = (kbData.results || []).filter(r => r.score > 0.2);
+          if (results.length > 0) {
+            kbContext = results.map(r => r.text?.slice(0, 100)).join('. ');
+          }
+        } catch {}
+
+        return {
+          meeting: {
+            summary: meeting.summary,
+            startTime: meeting.startTime,
+            endTime: meeting.endTime,
+            location: meeting.location,
+            description: meeting.description,
+          },
+          relatedEmails: emailContext || 'None found',
+          knowledgeBase: kbContext || 'No related entries',
+          totalEvents: events.length,
+        };
+      }
+      case 'daily_standup': {
+        const now = new Date();
+        const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+        yesterday.setHours(0, 0, 0, 0);
+        const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+        const todayEnd = new Date(now); todayEnd.setHours(23, 59, 59, 999);
+
+        // What I did yesterday -- from logs and transcripts
+        const [logs, transcripts] = await Promise.all([
+          fetch(baseUrl + '/api/logs', { headers: authHeaders() }).then(r => r.json()).catch(() => []),
+          fetch(baseUrl + '/api/transcripts', { headers: authHeaders() }).then(r => r.json()).catch(() => []),
+        ]);
+
+        const yesterdayLogs = logs.filter(l => {
+          const ts = l.timestamp || l.createdAt;
+          return ts && new Date(ts) >= yesterday && new Date(ts) < todayStart;
+        });
+        const yesterdayCommands = transcripts.filter(t => {
+          const ts = t.timestamp || t.createdAt;
+          return ts && t.source === 'voice' && new Date(ts) >= yesterday && new Date(ts) < todayStart;
+        });
+
+        // What's on today -- calendar
+        let todayEvents = [];
+        try {
+          todayEvents = await calendar.listEvents(todayStart.toISOString(), todayEnd.toISOString());
+        } catch {}
+
+        // Build standup
+        const standup = {
+          yesterday: {
+            logCount: yesterdayLogs.length,
+            logs: yesterdayLogs.slice(0, 5).map(l => (l.analysis?.summary || l.text || '').slice(0, 80)),
+            voiceCommands: yesterdayCommands.length,
+          },
+          today: {
+            events: todayEvents.map(e => ({ summary: e.summary, time: e.startTime })),
+            eventCount: todayEvents.length,
+          },
+        };
+
+        // Broadcast to compare panel for display
+        broadcast('comparison', {
+          title: 'Daily Standup — ' + now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
+          textA: 'Yesterday:\n' + (standup.yesterday.logs.length > 0 ? standup.yesterday.logs.join('\n') : 'No log entries'),
+          textB: 'Today:\n' + (standup.today.events.length > 0 ? standup.today.events.map(e => e.time + ' — ' + e.summary).join('\n') : 'No events scheduled'),
+          nameA: 'Yesterday',
+          nameB: 'Today',
+        });
+
+        return standup;
+      }
+      case 'focus_mode': {
+        const mins = input.duration_minutes || 25;
+        const secs = mins * 60;
+        const timerId = 'focus-' + Date.now();
+        const tH = Math.floor(mins / 60);
+        const tM = mins % 60;
+        let durationHuman = '';
+        if (tH > 0) durationHuman += `${tH} hour${tH > 1 ? 's' : ''} `;
+        if (tM > 0) durationHuman += `${tM} minute${tM > 1 ? 's' : ''}`;
+        durationHuman = durationHuman.trim();
+        const timerHandle = setTimeout(async () => {
+          _activeTimers.delete(timerId);
+          const msg = 'Focus session complete';
+          const timerSfx = getSoundEffect('sfx-alert-blue');
+          if (timerSfx) broadcast('play_sound', { url: timerSfx });
+          broadcast('alert_status', { level: 'blue', reason: msg });
+          broadcast('status', { message: msg });
+          try {
+            const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text: msg }) });
+            const ttsData = await ttsRes.json();
+            if (ttsData.audioUrl) broadcast('play_sound', { url: ttsData.audioUrl });
+          } catch {}
+          setTimeout(() => broadcast('alert_status', { level: 'normal', reason: 'Focus session acknowledged' }), 5000);
+        }, secs * 1000);
+        const endsAtMs = Date.now() + secs * 1000;
+        _activeTimers.set(timerId, { handle: timerHandle, label: 'Focus session', endsAt: endsAtMs });
+        broadcast('timer_started', { endsAt: new Date(endsAtMs).toISOString(), label: 'Focus session' });
+        try {
+          await fetch(baseUrl + '/api/logs', {
+            method: 'POST', headers: authHeaders(),
+            body: JSON.stringify({ text: 'Focus session started: ' + mins + ' minutes', category: 'personal' }),
+          });
+        } catch {}
+        broadcast('status', { message: 'FOCUS MODE: ' + mins + ' minutes' });
+        return { ok: true, duration: mins, timerId, durationHuman };
+      }
+      case 'clipboard_summarize': {
+        const clipText = execSync('pbpaste', { encoding: 'utf-8', maxBuffer: 1024 * 1024 });
+        if (!clipText || clipText.trim().length === 0) return { error: 'Clipboard is empty' };
+        const sumRes = await fetch(OLLAMA_BASE + '/v1/chat/completions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: VOICE_MODEL, stream: false, temperature: 0, max_tokens: 150,
+            messages: [{ role: 'user', content: 'Summarize this text concisely in 2-3 sentences:\n\n' + clipText.slice(0, 2000) }] }),
+        });
+        const sumData = await sumRes.json();
+        const summary = (sumData.choices?.[0]?.message?.content || '').trim();
+        return { summary, originalLength: clipText.length };
+      }
+      case 'git_status': {
+        const cwd = input.path || process.env.HOME;
+        try {
+          const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd, encoding: 'utf-8' }).trim();
+          const status = execSync('git status --short', { cwd, encoding: 'utf-8' }).trim();
+          const log = execSync('git log --oneline -5', { cwd, encoding: 'utf-8' }).trim();
+          const changes = status ? status.split('\n').length : 0;
+          return { branch, changes, modified: status || 'Clean', recentCommits: log.split('\n').slice(0, 5) };
+        } catch (err) {
+          return { error: 'Not a git repository or git not available: ' + err.message };
+        }
+      }
+      case 'network_info': {
+        let publicIP = 'unknown';
+        try {
+          const ipRes = await _fetchWithTimeout('https://api.ipify.org?format=json', 3000);
+          const ipData = await ipRes.json();
+          publicIP = ipData.ip;
+        } catch {}
+        const hostname = os.hostname();
+        const interfaces = os.networkInterfaces();
+        let localIP = 'unknown';
+        for (const [name, addrs] of Object.entries(interfaces)) {
+          for (const addr of addrs) {
+            if (addr.family === 'IPv4' && !addr.internal) { localIP = addr.address; break; }
+          }
+          if (localIP !== 'unknown') break;
+        }
+        return { publicIP, localIP, hostname };
+      }
       default:
         return { error: `Unknown tool: ${toolName}` };
     }
