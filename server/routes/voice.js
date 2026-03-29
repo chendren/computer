@@ -32,7 +32,7 @@ const router = Router();
  */
 router.get('/status', async (req, res) => {
   const voiceModel = process.env.VOICE_MODEL || 'llama3.1:8b';
-  const actionModel = process.env.ACTION_MODEL || 'llama3-groq-tool-use:8b';
+  const actionModel = process.env.ACTION_MODEL || 'llama3.1:8b';
   const moshi = getMoshiStatus();
   res.json({
     available: isVoiceAvailable(),
@@ -41,7 +41,7 @@ router.get('/status', async (req, res) => {
       action: actionModel,
     },
     provider: 'ollama',
-    architecture: 'dual-model',
+    architecture: 'single-model',
     features: ['deterministic_routing', 'tool_use', 'conversation_history', 'tts', 'panel_switching', 'moshi_speech_to_speech', 'gemini_live_s2s'],
     stt: { provider: 'voxtral', ...getVoxtralSTTStatus() },
     tts: { provider: 'kokoro', source: 'local' },
@@ -74,7 +74,7 @@ router.get('/config', (req, res) => {
       preSpeechPadFrames: 10,
     },
     modes: {
-      computer: { description: 'Tool-augmented voice commands via Voxtral STT → xLAM + Llama Scout → Kokoro TTS', default: true },
+      computer: { description: 'Tool-augmented voice commands via Voxtral STT → Llama 3.1 → Kokoro TTS', default: true },
       moshi: { description: 'Full-duplex speech-to-speech via Moshi (~200ms latency)' },
       gemini: { description: 'Gemini 3.1 Flash Live — cloud S2S with native tool calling' },
       openai: { description: 'OpenAI Realtime — GPT-4o S2S with semantic VAD and tool calling' },

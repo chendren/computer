@@ -789,7 +789,7 @@ function _broadcastChart(broadcastFn, { type, title, labels, datasets, sources, 
 /**
  * Smart chart executor — the complete chart generation pipeline.
  *
- * Accepts { query: string } from xLAM and handles the full pipeline:
+ * Accepts { query: string } from the action model and handles the full pipeline:
  *
  * Step 1: LLM intent parsing (_parseChartIntent)
  *   Llama 4 Scout extracts: subjects, timeRange, chartType, isComparison, searchQuery
@@ -1927,7 +1927,7 @@ export function initWebSocket(wss, baseUrl) {
                   sendTo(ws, 'voice_error', { error: err.message || 'Voice processing failed' });
                 });
               } else if (!available) {
-                sendTo(ws, 'voice_error', { error: 'Ollama not available or required models not found. Need: ' + (process.env.VOICE_MODEL || 'qwen3.5:9b') + ' and ' + (process.env.ACTION_MODEL || 'llama3-groq-tool-use:8b') });
+                sendTo(ws, 'voice_error', { error: 'Ollama not available or required model not found. Need: ' + (process.env.VOICE_MODEL || 'llama3.1:8b') });
               }
             });
             break;

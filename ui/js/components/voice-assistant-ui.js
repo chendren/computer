@@ -5,7 +5,7 @@
  *
  * Computer Mode (wake-word gated, traditional pipeline):
  *   Microphone → Silero VAD → WAV blob → server Whisper STT → wake word check
- *   → "voice_command" → xLAM tool routing → tool execution → Kokoro TTS → audio playback
+ *   → "voice_command" → Llama 3.1 tool routing → tool execution → Kokoro TTS → audio playback
  *
  * Moshi Mode (full-duplex S2S, ~200ms latency):
  *   Microphone → WebCodecs Opus encoder → WebSocket binary → Moshi MLX sidecar
@@ -38,7 +38,7 @@ const STATES = {
   LISTENING: 'listening',     // Computer mode: waiting to hear the wake word
   CAPTURING: 'capturing',     // Computer mode: speech detected, actively recording
   PROCESSING: 'processing',   // Computer mode: audio sent, waiting for Whisper STT result
-  THINKING: 'thinking',       // AI processing the command (xLAM routing + tool calls)
+  THINKING: 'thinking',       // AI processing the command (action model routing + tool calls)
   SPEAKING: 'speaking',       // TTS audio is playing back
   ERROR: 'error',             // Failed to start — auto-resets to IDLE after 8 seconds
   MOSHI_ACTIVE: 'moshi_active',   // Moshi mode: full-duplex conversation active
@@ -100,7 +100,7 @@ export class VoiceAssistantUI {
     this.vad = new VadService(); // Silero VAD + Opus streaming + Gemini PCM
     this.geminiAudio = new GeminiAudio(); // Gemini PCM playback
     this.state = STATES.IDLE;
-    this.voiceMode = 'computer'; // Default: Voxtral STT → xLAM routing → Kokoro TTS
+    this.voiceMode = 'computer'; // Default: Voxtral STT → Llama 3.1 routing → Kokoro TTS
     this.moshiTranscript = ''; // Accumulates Moshi text tokens for display
     this.geminiTranscript = ''; // Accumulates Gemini text tokens for display
     this.openaiTranscript = ''; // Accumulates OpenAI Realtime text tokens

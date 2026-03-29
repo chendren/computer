@@ -51,7 +51,11 @@ export async function startMoshi(pluginRoot) {
     try {
       moshiProcess = spawn(pythonPath, ['-m', 'moshi_mlx.local_web', '-q', '4', '--hf-repo', 'kyutai/moshika-mlx-q4'], {
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, MOSHI_PORT: String(MOSHI_PORT) },
+        env: {
+          ...process.env,
+          MOSHI_PORT: String(MOSHI_PORT),
+          HF_HOME: path.join(process.env.HOME || '/tmp', '.cache', 'huggingface'),
+        },
       });
 
       let resolved = false;

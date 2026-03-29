@@ -1,34 +1,31 @@
 /**
- * Voice Assistant Service — Dual-Model Architecture
+ * Voice Assistant Service — Single-Model Architecture
  *
- * Uses two local Ollama models in a pipeline:
+ * Uses one local Ollama model (llama3.1:8b) for both tool routing and response generation:
  *
- * 1. xLAM 8B F16 (Salesforce Large Action Model):
- *    A model specifically fine-tuned for function/tool selection. Given the user's
- *    command, it outputs a list of tool calls in OpenAI's tool_calls format.
- *    This model is deterministic and fast — it routes without hallucinating.
+ * 1. Tool routing: llama3.1 supports OpenAI-compatible tool_calls natively via
+ *    Ollama's /v1/chat/completions endpoint. Given the user's command, it outputs
+ *    tool calls in standard OpenAI tool_calls format.
  *
- * 2. Llama 4 Scout (Meta 17B MoE "Maverick" variant via Ollama):
- *    A large mixture-of-experts model used for conversational response generation.
- *    After tools execute, Scout synthesizes the results into a spoken response
- *    that sounds natural when read aloud by the TTS system.
+ * 2. Response generation: After tools execute, the same model synthesizes the results
+ *    into a spoken response that sounds natural when read aloud by the TTS system.
  *
  * Processing pipeline per voice command:
  *   1. Auto-search: if the query needs current data (prices, weather, news),
  *      proactively fetch web results and inject them into the prompt as facts.
- *   2. xLAM routing: ask xLAM which tools to call for this command.
- *   3. Safety nets: correct xLAM's tool selection for known failure modes
+ *   2. Tool routing: ask llama3.1 which tools to call for this command.
+ *   3. Safety nets: correct tool selection for known failure modes
  *      (email keywords, visualization keywords).
  *   4. Tool execution: run each selected tool via the tool executor (internal APIs).
  *   5. Shortcut responses: for predictable tool results (time, alerts, charts, email),
- *      bypass Scout and construct the spoken response directly to avoid hallucination.
- *   6. Scout response: for everything else, ask Scout to generate a natural response
- *      from the tool results, staying under ~200 chars for TTS.
+ *      bypass the response model and construct the spoken response directly.
+ *   6. Response generation: for everything else, ask the model to generate a natural
+ *      response from the tool results, staying under ~200 chars for TTS.
  */
 
 const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';
 const VOICE_MODEL = process.env.VOICE_MODEL || 'llama3.1:8b';
-const ACTION_MODEL = process.env.ACTION_MODEL || 'llama3-groq-tool-use:8b';
+const ACTION_MODEL = process.env.ACTION_MODEL || 'llama3.1:8b';
 
 // Per-session conversation history
 const sessions = new Map();
@@ -573,7 +570,7 @@ const MAX_TOOL_LOOPS = 10;
 
 
 /**
- * Call Salesforce xLAM action model for deterministic tool selection.
+ * Call action model (llama3.1) for tool selection.
  * Uses standard OpenAI tool_calls format — finish_reason: "tool_calls"
  * with message.tool_calls array of {id, function: {name, arguments}}.
  */
@@ -600,7 +597,7 @@ async function callActionModel(userText) {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`xLAM API error ${res.status}: ${errText.slice(0, 200)}`);
+    throw new Error(`Action model API error ${res.status}: ${errText.slice(0, 200)}`);
   }
 
   const data = await res.json();
@@ -614,7 +611,7 @@ async function callActionModel(userText) {
     }));
   }
 
-  // Format 2: xLAM sometimes serializes tool calls as JSON in the content field
+  // Format 2: some models serialize tool calls as JSON in the content field
   // instead of the tool_calls array — this is a model quirk, not an API bug.
   // Examples seen in the wild:
   //   [{"name": "search_knowledge", "parameters": {"query": "..."}}]
@@ -673,11 +670,11 @@ async function callResponseModel(messages, systemPrompt) {
 }
 
 /**
- * Process a voice command using dual-model architecture.
+ * Process a voice command using single-model architecture.
  *
- * 1. xLAM determines which tools to call (deterministic routing)
+ * 1. Action model determines which tools to call (tool routing)
  * 2. Tools are executed server-side
- * 3. Llama 4 Scout generates a conversational response from the results
+ * 3. Response model generates a conversational response from the results
  *
  * @param {string} sessionId - Unique session identifier
  * @param {string} userText - Transcribed voice command (wake word stripped)
@@ -692,10 +689,10 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
 
   // Auto-search: detect queries that need current data not in the model's training.
   // If these keywords appear, proactively fetch web results and inject the facts
-  // into the prompt BEFORE calling xLAM. This way the model has real data to
+  // into the prompt BEFORE calling the action model. This way the model has real data to
   // work with, rather than relying on possibly-stale parametric knowledge.
-  // The alternative (letting xLAM call web_search_and_read) is slower because
-  // it requires an extra model round-trip first.
+  // The alternative (letting the action model call web_search_and_read) is slower because
+  // it requires an extra round-trip first.
   const searchKeywords = ['price', 'cost', 'worth', 'stock', 'quote', 'weather', 'forecast',
     'temperature', 'score', 'result', 'news', 'latest', 'current', 'today', 'right now',
     'how much is', 'spot price', 'market', 'exchange rate', 'rate of', 'bitcoin', 'btc',
@@ -785,7 +782,7 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   }
 
   // If we have a direct answer from structured data (e.g. Swissquote price), skip LLM entirely.
-  // Exception: if the user wants a visualization, let the full pipeline run so xLAM
+  // Exception: if the user wants a visualization, let the full pipeline run so the action model
   // can call generate_chart ("show me gold prices as a chart" shouldn't just speak the price).
   const vizKeywords = ['chart', 'graph', 'plot', 'table', 'visualiz', 'trend', 'show me', 'show the', 'show data', 'display data', 'compare data', 'comparison', 'versus', ' vs '];
   const wantsViz = vizKeywords.some(kw => lowerText.includes(kw));
@@ -797,19 +794,19 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     return { text: directAnswer, toolsUsed, panelSwitch };
   }
 
-  // Step 1: Ask xLAM what tools to call (deterministic routing)
-  console.log(`[voice-ai] [xLAM] Routing: "${userText}"`);
+  // Step 1: Ask action model what tools to call (tool routing)
+  console.log(`[voice-ai] [action] Routing: "${userText}"`);
   let actionToolCalls = [];
   try {
     actionToolCalls = await callActionModel(userText);
-    console.log(`[voice-ai] [xLAM] Selected ${actionToolCalls.length} tool(s): ${actionToolCalls.map(t => t.name).join(', ') || 'none'}`);
+    console.log(`[voice-ai] [action] Selected ${actionToolCalls.length} tool(s): ${actionToolCalls.map(t => t.name).join(', ') || 'none'}`);
   } catch (err) {
-    console.warn(`[voice-ai] [xLAM] Routing failed, falling back to no tools: ${err.message}`);
+    console.warn(`[voice-ai] [action] Routing failed, falling back to no tools: ${err.message}`);
   }
 
-  // xLAM safety net #1: email tool routing.
-  // xLAM sometimes fails to select the correct email tool or selects none at all.
-  // If the user's request contains email-related keywords but xLAM didn't pick
+  // Safety net #1: email tool routing.
+  // The action model sometimes fails to select the correct email tool or selects none at all.
+  // If the user's request contains email-related keywords but the model didn't pick
   // an email tool, we override and force the appropriate one based on intent signals.
   const emailKeywords = ['email', 'inbox', 'mail', 'gmail', 'follow-up', 'followup', 'unread'];
   const wantsEmail = emailKeywords.some(kw => lowerText.includes(kw));
@@ -834,43 +831,43 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
       emailTool = 'read_email';
       emailArgs = { query: userText };
     }
-    console.log(`[voice-ai] [xLAM] Forcing ${emailTool} — user request contains email keyword`);
+    console.log(`[voice-ai] [action] Forcing ${emailTool} — user request contains email keyword`);
     actionToolCalls = [{ name: emailTool, arguments: emailArgs }];
   }
 
-  // xLAM safety net #2: chart routing.
-  // xLAM misses visualization requests fairly often. If the user's request contains
-  // chart/graph/plot/table keywords but xLAM didn't select generate_chart, inject it.
+  // Safety net #2: chart routing.
+  // The action model misses visualization requests fairly often. If the user's request contains
+  // chart/graph/plot/table keywords but the model didn't select generate_chart, inject it.
   // Skip this if email tools are already selected (e.g. "show me my inbox" is not a chart).
   const hasChartCall = actionToolCalls.some(tc => tc.name === 'generate_chart');
   if (!hasChartCall && wantsViz && !wantsEmail) {
-    console.log(`[voice-ai] [xLAM] Forcing generate_chart — user request contains visualization keyword`);
+    console.log(`[voice-ai] [action] Forcing generate_chart — user request contains visualization keyword`);
     actionToolCalls.push({ name: 'generate_chart', arguments: { query: userText } });
   }
 
-  // xLAM safety net #3: weather routing.
+  // Safety net #3: weather routing.
   const weatherKw = ['weather', 'temperature', 'forecast', 'is it going to rain', 'how hot', 'how cold'];
   if (weatherKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'get_weather')) {
-    console.log(`[voice-ai] [xLAM] Forcing get_weather — user request contains weather keyword`);
+    console.log(`[voice-ai] [action] Forcing get_weather — user request contains weather keyword`);
     actionToolCalls.push({ name: 'get_weather', arguments: {} });
   }
 
-  // xLAM safety net #4: timer routing.
+  // Safety net #4: timer routing.
   const timerKw = ['start a timer', 'timer for', 'set a timer', 'countdown', 'time me for'];
   if (timerKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'start_timer')) {
-    console.log(`[voice-ai] [xLAM] Forcing start_timer — user request contains timer keyword`);
+    console.log(`[voice-ai] [action] Forcing start_timer — user request contains timer keyword`);
     actionToolCalls.push({ name: 'start_timer', arguments: { duration_seconds: 60 } });
   }
 
-  // xLAM safety net #5: system info routing.
+  // Safety net #5: system info routing.
   const sysKeywords = ['system info', 'system resources', 'system status', 'how much memory', 'how much ram', 'disk space', 'cpu usage'];
   const wantsSys = sysKeywords.some(kw => lowerText.includes(kw));
   if (wantsSys && !actionToolCalls.some(tc => tc.name === 'system_info')) {
-    console.log(`[voice-ai] [xLAM] Forcing system_info — user request contains system keyword`);
+    console.log(`[voice-ai] [action] Forcing system_info — user request contains system keyword`);
     actionToolCalls.push({ name: 'system_info', arguments: {} });
   }
 
-  // xLAM safety net #4: calendar routing.
+  // Safety net #6: calendar routing.
   const calendarKeywords = ['calendar', 'schedule a meeting', 'meetings today', 'appointment', 'what\'s on my schedule', 'am i free'];
   const wantsCalendar = calendarKeywords.some(kw => lowerText.includes(kw));
   const hasCalendarCall = actionToolCalls.some(tc => tc.name === 'check_calendar' || tc.name === 'create_event');
@@ -878,11 +875,11 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     const createKw = ['schedule a', 'book a', 'create an event', 'add to calendar', 'put on my calendar'];
     const wantsCreate = createKw.some(kw => lowerText.includes(kw));
     const calTool = wantsCreate ? 'create_event' : 'check_calendar';
-    console.log(`[voice-ai] [xLAM] Forcing ${calTool} — user request contains calendar keyword`);
+    console.log(`[voice-ai] [action] Forcing ${calTool} — user request contains calendar keyword`);
     actionToolCalls.push({ name: calTool, arguments: wantsCreate ? { summary: userText } : {} });
   }
 
-  // Step 2: Execute xLAM-selected tools
+  // Step 2: Execute action model-selected tools
   let loops = 0;
   for (const toolCall of actionToolCalls) {
     if (++loops > MAX_TOOL_LOOPS) {
@@ -900,7 +897,7 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
       fnArgs = {};
     }
 
-    // generate_chart: always pass original user text as query — xLAM can't be trusted to do this
+    // generate_chart: always pass original user text as query — the action model can't be trusted to do this
     if (fnName === 'generate_chart') {
       fnArgs = { query: userText };
     }
@@ -1394,17 +1391,21 @@ async function checkOllama() {
       const data = await res.json();
       const models = (data.models || []).map(m => m.name);
       const hasVoice = models.some(m => m === VOICE_MODEL || m.startsWith(VOICE_MODEL));
-      const hasAction = models.some(m => m === ACTION_MODEL || m.startsWith(ACTION_MODEL));
+      const hasAction = VOICE_MODEL === ACTION_MODEL ? hasVoice : models.some(m => m === ACTION_MODEL || m.startsWith(ACTION_MODEL));
       _ollamaAvailable = hasVoice && hasAction;
       // Only log when status changes — suppresses the every-30s spam
       if (_ollamaAvailable !== _lastLoggedAvailable) {
         _lastLoggedAvailable = _ollamaAvailable;
         if (_ollamaAvailable) {
-          console.log(`[voice-ai] Ollama available — voice: ${VOICE_MODEL}, action: ${ACTION_MODEL}`);
+          if (VOICE_MODEL === ACTION_MODEL) {
+            console.log(`[voice-ai] Ollama available — single model: ${VOICE_MODEL}`);
+          } else {
+            console.log(`[voice-ai] Ollama available — voice: ${VOICE_MODEL}, action: ${ACTION_MODEL}`);
+          }
         } else {
           const missing = [];
           if (!hasVoice) missing.push(VOICE_MODEL);
-          if (!hasAction) missing.push(ACTION_MODEL);
+          if (!hasAction && VOICE_MODEL !== ACTION_MODEL) missing.push(ACTION_MODEL);
           console.warn(`[voice-ai] Ollama online but missing models: ${missing.join(', ')}. Available: ${models.join(', ')}`);
         }
       }
@@ -1421,7 +1422,7 @@ async function checkOllama() {
 // Re-check Ollama availability every 30 seconds
 setInterval(() => checkOllama(), 30000);
 
-// Keep both Ollama models warm in GPU VRAM by sending no-op requests every 10 minutes.
+// Keep Ollama model(s) warm in GPU VRAM by sending no-op requests every 10 minutes.
 // Without this, Ollama evicts models from VRAM after 5 minutes of inactivity.
 // Eviction means the next voice command has a 5-30s cold-start delay while the model
 // is loaded back. Keeping them warm ensures sub-second inference start times.
@@ -1432,11 +1433,14 @@ async function keepModelsWarm() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: VOICE_MODEL, keep_alive: '30m', prompt: '' }),
     });
-    await fetch(`${OLLAMA_BASE}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: ACTION_MODEL, keep_alive: '30m', prompt: '' }),
-    });
+    // Only send a second warm-up if action model differs from voice model
+    if (ACTION_MODEL !== VOICE_MODEL) {
+      await fetch(`${OLLAMA_BASE}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: ACTION_MODEL, keep_alive: '30m', prompt: '' }),
+      });
+    }
   } catch {}
 }
 keepModelsWarm();
