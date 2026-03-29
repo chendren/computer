@@ -1,27 +1,25 @@
 /**
  * Voice Assistant UI — State machine for voice interaction.
  *
- * Supports two voice modes:
+ * Default mode is Computer (CMD). Four voice modes cycle via mode button:
+ *   CMD → Gemini → OpenAI → Nova → CMD
  *
- * Computer Mode (wake-word gated, traditional pipeline):
- *   Microphone → Silero VAD → WAV blob → server Whisper STT → wake word check
- *   → "voice_command" → Llama 3.1 tool routing → tool execution → Kokoro TTS → audio playback
+ * Computer Mode (CMD, wake-word gated):
+ *   Microphone → Silero VAD → WAV blob → Voxtral STT → wake word check
+ *   → voice_command → Llama 3.1 tool routing → tool execution → Kokoro TTS → playback
  *
- * Moshi Mode (full-duplex S2S, ~200ms latency):
- *   Microphone → WebCodecs Opus encoder → WebSocket binary → Moshi MLX sidecar
- *   Moshi audio → WebSocket binary → WebCodecs Opus decoder → AudioContext playback
- *   Wake word "Computer" in Moshi transcript → briefly switch to Computer mode for command
+ * Cloud S2S Modes (Gemini, OpenAI, Nova):
+ *   Full-duplex streaming via respective cloud APIs with bridge proxying.
  *
- * State machine transitions:
+ * UI features:
+ *   - Always-on wake word toggle (AUTO/MANUAL button)
+ *   - Keyboard shortcuts: F5 or Space to toggle voice
+ *   - Voice suggestions overlay for command discoverability
+ *   - Sound effect playback (play_sound WebSocket handler)
+ *   - Streaming TTS chunks (voice_audio_chunk handler for long responses)
  *
- *   IDLE ──activate()──→ LISTENING (Computer) or MOSHI_ACTIVE (Moshi)
- *
- *   Computer mode:
- *   LISTENING → CAPTURING (speech) → PROCESSING (Whisper) → THINKING (AI) → SPEAKING → LISTENING
- *
- *   Moshi mode:
- *   MOSHI_ACTIVE → THINKING (wake word) → SPEAKING → MOSHI_ACTIVE
- *
+ * State machine:
+ *   IDLE → LISTENING → CAPTURING → PROCESSING → THINKING → SPEAKING → LISTENING
  *   Any state → ERROR (auto-resets to IDLE after 8s)
  *   Any state → IDLE (deactivate)
  */

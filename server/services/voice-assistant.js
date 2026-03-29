@@ -1,26 +1,22 @@
 /**
  * Voice Assistant Service — Single-Model Architecture
  *
- * Uses one local Ollama model (llama3.1:8b) for both tool routing and response generation:
- *
- * 1. Tool routing: llama3.1 supports OpenAI-compatible tool_calls natively via
- *    Ollama's /v1/chat/completions endpoint. Given the user's command, it outputs
- *    tool calls in standard OpenAI tool_calls format.
- *
- * 2. Response generation: After tools execute, the same model synthesizes the results
- *    into a spoken response that sounds natural when read aloud by the TTS system.
+ * Uses one local Ollama model (llama3.1:8b) for both tool routing and response
+ * generation via OpenAI-compatible tool_calls. 45 voice tools cover ship systems,
+ * email, calendar, web search, charts, timers, ambient audio, and more.
  *
  * Processing pipeline per voice command:
- *   1. Auto-search: if the query needs current data (prices, weather, news),
- *      proactively fetch web results and inject them into the prompt as facts.
- *   2. Tool routing: ask llama3.1 which tools to call for this command.
- *   3. Safety nets: correct tool selection for known failure modes
- *      (email keywords, visualization keywords).
- *   4. Tool execution: run each selected tool via the tool executor (internal APIs).
- *   5. Shortcut responses: for predictable tool results (time, alerts, charts, email),
- *      bypass the response model and construct the spoken response directly.
- *   6. Response generation: for everything else, ask the model to generate a natural
- *      response from the tool results, staying under ~200 chars for TTS.
+ *   1. Auto-search: proactively fetch web results for queries needing current data.
+ *   2. Tool routing: llama3.1 selects tools via /v1/chat/completions tool_calls.
+ *   3. Safety nets: 18 keyword-based fallback rules correct common routing failures.
+ *   4. Tool execution: run selected tools via the internal tool executor.
+ *   5. Shortcut responses: bypass LLM for predictable results (time, charts, email).
+ *   6. Response generation: LLM synthesizes natural spoken response from tool results.
+ *
+ * Additional capabilities:
+ *   - Conversation memory with per-session history (20 turns, 4-hour TTL)
+ *   - Pronoun resolution (resolves "it", "that", "them" from prior context)
+ *   - Multi-step chain detection: splits "X then Y" into sequential sub-commands
  */
 
 const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';

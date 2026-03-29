@@ -1,3 +1,18 @@
+/**
+ * Computer App — LCARS UI application shell.
+ *
+ * Bootstraps all UI panels, services, and WebSocket event routing.
+ * Defers WebSocket connection until the auth token is fetched to avoid 401s.
+ *
+ * Key behaviors:
+ *   - Voice panel lock: prevents background events from stealing focus during
+ *     voice playback (voice_panel_switch / voice_done lifecycle)
+ *   - Quick action buttons: one-tap access to common voice commands
+ *   - Text command bar: type commands instead of speaking them
+ *   - Ambient audio integration: procedural background sound presets
+ *   - Timer countdown: live updating timer display in the status bar
+ *   - Auto-panel switching: WebSocket data pushes activate the relevant panel
+ */
 import { WebSocketClient } from './services/websocket-client.js';
 import { ApiClient } from './services/api-client.js';
 import { AudioPlayer } from './services/audio-player.js';

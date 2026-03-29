@@ -3,16 +3,17 @@
  *
  * Responsibilities:
  *   1. Voice pipeline routing: binary audio → Voxtral STT (Computer mode)
- *      or binary audio → Moshi bridge (Moshi mode)
- *   2. Command processing: text commands → voice-assistant.js dual-model pipeline
- *   3. Moshi bridge: proxy Opus audio and text tokens between browser and Moshi MLX
- *   4. Smart chart executor: LLM-parsed intent → financial APIs / web search → chart data
- *   5. Tool executor: maps AI tool calls to internal REST API endpoints
- *   6. Web scraping helpers: DuckDuckGo search + HTML page fetching (no regex — see below)
- *
- * Note on "no regex" style in this file:
- *   A hookify rule prevents regex literals in this codebase. All pattern matching
- *   is done with string methods: indexOf, split, slice, includes, etc.
+ *      or bridge proxying for Moshi / Gemini / OpenAI / Nova Sonic modes
+ *   2. Command processing: text commands → voice-assistant.js single-model pipeline
+ *   3. Tool executor: 45+ tool case handlers mapping AI tool calls to internal APIs
+ *   4. Smart chart executor: LLM-parsed intent → Yahoo Finance API (real historical
+ *      prices) or web search → chart data
+ *   5. Streaming TTS: sentence-level chunking for long responses (voice_audio_chunk)
+ *   6. Sound effects: alert/reminder/timer/error SFX via play_sound broadcasts
+ *   7. Timer and reminder audio: countdown broadcasting with completion alerts
+ *   8. Ambient sound control: play/stop ambient audio presets
+ *   9. Voice transcript logging: persists STT results for briefing and search
+ *   10. Web scraping helpers: DuckDuckGo search + HTML page fetching
  */
 
 import { transcribeChunk } from './transcription.js';

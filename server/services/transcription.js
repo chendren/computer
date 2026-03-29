@@ -1,20 +1,13 @@
 /**
- * Transcription Service — Voxtral-based speech-to-text via mlx-audio sidecar.
+ * Transcription Service — Voxtral Mini 3B speech-to-text via mlx-audio sidecar.
  *
  * Routes audio to the Voxtral STT sidecar (scripts/voxtral-stt-server.py)
- * running on port 8997. The sidecar keeps the Voxtral Mini 3B model warm
- * in memory for sub-second inference on Apple Silicon (Metal GPU).
+ * on port 8997. The sidecar keeps Voxtral Mini 3B warm in memory for
+ * sub-second inference on Apple Silicon (Metal GPU).
  *
  * Two entry points:
- *
- * transcribeChunk(buffer, format):
- *   For real-time voice commands via WebSocket. Sends raw audio bytes
- *   to the sidecar for fast transcription (~1-3s on M-series).
- *
- * transcribeFile(filePath):
- *   For full audio file transcription (from the /computer:transcribe command).
- *   Reads the file and sends it to the sidecar. Returns structured result
- *   with text, timing, and token stats.
+ *   - transcribeChunk(buffer, format): real-time voice commands via WebSocket
+ *   - transcribeFile(filePath): full file transcription (/computer:transcribe)
  */
 
 import fs from 'fs/promises';

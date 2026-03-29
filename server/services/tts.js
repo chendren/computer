@@ -1,11 +1,13 @@
 /**
- * TTS Service — Kokoro-based text-to-speech via kokoro-js (local ONNX).
+ * TTS Service — Kokoro 82M text-to-speech via kokoro-js (local ONNX).
  *
- * Uses the Kokoro 82M model running locally through ONNX Runtime.
- * The model is loaded once on server startup and kept warm in memory.
+ * Uses Kokoro 82M (q8 quantized, ~92MB) running locally through ONNX Runtime.
+ * Lazy-loaded on first use and kept warm in memory for subsequent requests.
+ * 15 voices available (6 American female, 5 American male, 2 British female,
+ * 2 British male). Default voice: af_heart (configurable via KOKORO_VOICE).
  *
- * Voice: configurable via KOKORO_VOICE env var (default: af_heart)
- * Model: onnx-community/Kokoro-82M-v1.0-ONNX (q8 quantized, ~92MB)
+ * TTS cache cleanup preserves sound effect files (sfx- prefix) while purging
+ * expired speech files older than 5 minutes.
  */
 
 import fs from 'fs/promises';

@@ -104,6 +104,14 @@ Everything runs on your own machine. No cloud voice APIs required (though option
 - **System control** -- Panel switching, alerts, reminders, monitoring. "Computer, red alert" / "Computer, show me the charts panel"
 - **AI analysis** -- Sentiment, topics, entities, action items from text
 - **Reminders** -- "Computer, remind me in 30 minutes to check the build"
+- **News** -- Live news headlines via DuckDuckGo. "Computer, what's the latest news on SpaceX?"
+- **Definitions** -- Instant word definitions via LLM. "Computer, define 'ephemeral'"
+- **Notes** -- Quick save/list notes stored in knowledge base. "Computer, save a note: review PR by Friday"
+- **Random facts** -- LLM-generated trivia. "Computer, tell me a random fact"
+- **Activity reports** -- Daily/weekly summaries of voice commands, analyses, and logs. "Computer, generate a daily report"
+- **Document analysis** -- Upload PDF/TXT/MD files for AI analysis. "Computer, analyze this document"
+- **Ambient sounds** -- Procedural ambient audio (bridge, engineering, space) via Web Audio API. "Computer, play bridge ambience"
+- **Unit conversion** -- 27 unit types integrated into the calculate tool. "Computer, convert 100 miles to kilometers"
 
 ### Data Visualization
 - Natural language chart requests ("bar chart of population by country")
@@ -152,6 +160,7 @@ Here is the complete path from your mouth to the computer's voice, step by step:
 8. Response shortcut: no LLM needed for known-format tools -> pre-built spoken string
    "The time is 10:07 AM. Wednesday, February 18, 2026. Stardate 102.132."
 9. Kokoro TTS (local ONNX, in-process Node.js) synthesizes the text -> WAV
+   -- For long responses, text is split at sentence boundaries and streamed as chunks
 10. LCARS sends voice_response event with audioUrl to browser
 11. Browser fetches WAV, plays through HTML5 Audio
 12. VAD resumes listening
@@ -195,8 +204,8 @@ User input (text or voice)
               | tool_calls: [{name: "web_search_and_read", args: {...}}]
               v
    +---------------------+
-   |  Tool Executor       |  <- 25+ tools: search, charts, email, knowledge, etc.
-   |  (run the tools)     |    Results are real data, not hallucinated
+   |  Tool Executor       |  <- 46 tools: search, charts, email, knowledge, notes,
+   |  (run the tools)     |    news, ambient, reports, etc. Real data, not hallucinated
    +----------+-----------+
               | tool_results: [{content: "Gold price: $2,847/oz..."}]
               v
@@ -211,6 +220,12 @@ User input (text or voice)
 
 Many tools bypass llama3.1:8b entirely (shortcut paths) for speed and accuracy -- `get_time`, `set_alert`, `check_email`, `generate_chart`, `create_reminder`, etc. use pre-built response templates from the tool output, avoiding any chance of the LLM hallucinating numbers or facts.
 
+**Conversation memory:** The pipeline maintains session history for pronoun resolution -- saying "chart that" after a search will use the previous search results as context.
+
+**Multi-step chains:** Commands like "search for X, then chart it" are split and executed sequentially through the tool pipeline.
+
+**Safety nets:** 18 keyword-based fallbacks cover all tool categories, ensuring commands route correctly even when the LLM misses the tool call.
+
 ### The LCARS Interface
 
 The browser UI is a single-page application (no framework, no build step -- pure vanilla JavaScript ES modules served directly by Express). It maintains a persistent WebSocket connection to the server. As the AI completes work, it pushes results over WebSocket and the relevant panel auto-updates:
@@ -220,6 +235,17 @@ The browser UI is a single-page application (no framework, no build step -- pure
 - An alert -> `alert_status` event -> entire UI flashes the alert color
 
 The 19 panels share a common pattern: they register a WebSocket message handler in their constructor, and the server pushes data to them as events complete. No polling, no manual refresh.
+
+Additional UI features:
+
+- **Always-on wake word** -- AUTO/MANUAL toggle persists via localStorage. In AUTO mode, the system listens continuously for "Computer" without needing to click the diamond button.
+- **Quick action buttons** -- 8 one-click LCARS buttons across the top: TIME, WEATHER, SYSTEM, EMAIL, CALENDAR, REPORT, CONVERT, RED ALERT.
+- **Text command bar** -- `COMPUTER>` prompt at the bottom of the screen. Type commands and press Enter to execute without voice.
+- **Keyboard shortcuts** -- F5 or Space toggles voice on/off.
+- **Voice suggestions overlay** -- "Try saying..." panel appears when listening, auto-dismisses after a few seconds.
+- **Enhanced status bar** -- Live timer countdown, voice mode indicator (CMD/Gemini/OpenAI/Nova), and connected services count.
+- **Sound effects** -- 6 Kokoro-generated audio cues (Acknowledged, Red alert, Processing, etc.) via the am_michael voice, triggered on specific events.
+- **Voice transcript logging** -- All voice interactions auto-saved to the Transcript panel with timestamps.
 
 ---
 
@@ -315,7 +341,7 @@ The Voxtral model (`mlx-community/Voxtral-Mini-3B-2507-bf16`) is auto-downloaded
 
 ### For Kokoro TTS (Included)
 
-Kokoro TTS is installed as part of `npm install` via the `kokoro-js` npm package. The ONNX model (`onnx-community/Kokoro-82M-v1.0-ONNX`, q8 quantized, ~92MB) is auto-downloaded on first use. No additional setup required. 15 voices available (af_heart is the default).
+Kokoro TTS is installed as part of `npm install` via the `kokoro-js` npm package. The ONNX model (`onnx-community/Kokoro-82M-v1.0-ONNX`, q8 quantized, ~92MB) is auto-downloaded on first use. No additional setup required. 15 voices available (af_heart is the default). The model pre-warms on server start for zero-latency first use.
 
 ### For Moshi Voice (Optional)
 
@@ -585,6 +611,15 @@ Use the TTS-only commands (`/computer:gemini-speak`, `/computer:openai-speak`, `
 | `Computer, open https://example.com` | Opens URL in Browser panel |
 | `Computer, what is my system status?` | Returns health/connectivity summary |
 | `Computer, show me the dashboard` | Switches to Dashboard panel |
+| `Computer, what's the latest news on [topic]` | News headlines via DuckDuckGo, speaks top 3 |
+| `Computer, define [word]` | Instant word definition via LLM |
+| `Computer, save a note: [text]` | Saves a quick note to knowledge base |
+| `Computer, list my notes` | Lists all saved notes |
+| `Computer, tell me a random fact` | LLM-generated trivia |
+| `Computer, generate a daily report` | Activity summary of voice commands, analyses, logs |
+| `Computer, play bridge ambience` | Procedural ambient sounds (bridge, engineering, space) |
+| `Computer, convert 100 miles to kilometers` | Unit conversion (27 unit types) |
+| `Computer, analyze this document` | PDF/TXT/MD upload + AI analysis |
 
 ---
 
@@ -1125,7 +1160,7 @@ The auth token lives at `data/.auth-token` and is automatically used by:
 |       +-- vision.js                  Ollama vision analysis (base64 image -> structured JSON)
 |       +-- node-local.js              Local machine node: camera, screen, whitelisted commands
 |       +-- cron-scheduler.js          Cron with minute granularity, persistent in data/cron.json
-|       +-- plugins.js                 Static tool/hook/plugin registry (26 tools, 4 hooks)
+|       +-- plugins.js                 Static tool/hook/plugin registry (46 tools, 4 hooks)
 |       +-- gmail.js                   Gmail API: OAuth, inbox, send, threads, AI summaries
 |       +-- vectordb.js                LanceDB connection pool
 |       +-- embeddings.js              Ollama nomic-embed-text wrapper
@@ -1136,6 +1171,8 @@ The auth token lives at `data/.auth-token` and is automatically used by:
 |       +-- tts.js                     Kokoro TTS queue with WAV output
 |       +-- claude-bridge.js           Ollama LLM bridge (chat completions)
 |       +-- notifications.js           macOS desktop notifications via osascript
+|       +-- sound-effects.js          Pre-generated Kokoro sound effect WAVs (6 cues)
+|       +-- calendar.js               Google Calendar API service
 |
 +-- ui/
 |   +-- index.html                     SPA shell: auth token injection, 19 panel HTML
@@ -1176,6 +1213,7 @@ The auth token lives at `data/.auth-token` and is automatically used by:
 |       |   +-- audio-player.js        TTS queue (HTML5 Audio) + streaming playback
 |       |   +-- vad-service.js         Silero VAD (Computer mode) + audio capture
 |       |   +-- gemini-audio.js        Gemini Live audio bridge
+|       |   +-- ambient-audio.js      Web Audio API procedural ambient sounds
 |       |
 |       +-- utils/
 |           +-- formatters.js          Date/number/text formatting helpers

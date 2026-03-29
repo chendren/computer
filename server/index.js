@@ -18,13 +18,14 @@
  *   1. Storage (SQLite for logs, transcripts, etc.)
  *   2. VectorDB (LanceDB for knowledge base)
  *   3. Auth token generation
- *   4. Express middleware stack
- *   5. API routes mounted under /api/
- *   6. WebSocket server (voice pipeline)
- *   7. Voxtral STT sidecar (local speech-to-text on port 8997)
- *   8. Moshi MLX sidecar (optional, if installed)
- *   8. Gmail OAuth (optional, if configured)
- *   9. HTTP server listen on PORT
+ *   4. Local services (config, agents, cron, monitor poller)
+ *   5. Sound effects pre-generation (non-blocking, via Kokoro TTS)
+ *   6. Voxtral STT sidecar (port 8997, non-fatal)
+ *   7. Moshi MLX sidecar (optional, non-fatal)
+ *   8. Express middleware stack + API routes under /api/
+ *   9. WebSocket server (voice pipeline)
+ *   10. Gmail OAuth (optional, if configured)
+ *   11. HTTP server listen on PORT
  */
 
 import express from 'express';
