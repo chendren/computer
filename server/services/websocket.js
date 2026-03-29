@@ -22,6 +22,12 @@ import { createMoshiBridge, isMoshiRunning, KIND_AUDIO } from './moshi.js';
 import { createGeminiBridge, isGeminiAvailable, KIND_GEMINI } from './gemini-live.js';
 import { createOpenAIRealtimeBridge, isOpenAIRealtimeAvailable, KIND_OPENAI } from './openai-realtime.js';
 import { createNovaSonicBridge, isNovaSonicAvailable, KIND_NOVA } from './nova-sonic.js';
+import { execSync } from 'child_process';
+import os from 'os';
+import { captureScreen } from './node-local.js';
+import { analyzeImage } from './vision.js';
+import { listJobs, addJob, removeJob, toggleJob } from './cron-scheduler.js';
+import * as calendar from './calendar.js';
 
 const clients = new Set();
 // Per-client state: { voiceMode: 'moshi'|'computer'|'gemini'|'openai'|'nova', bridges + text buffers }
@@ -393,6 +399,24 @@ function _resolveYahooSymbol(assetName) {
   }
   return null;
 }
+
+// ── Active timers ─────────────────────────────────────────
+const _activeTimers = new Map();
+
+// ── Weather code descriptions (WMO) ──────────────────────
+const WMO_CODES = {
+  0: 'clear sky', 1: 'mainly clear', 2: 'partly cloudy', 3: 'overcast',
+  45: 'foggy', 48: 'rime fog', 51: 'light drizzle', 53: 'drizzle', 55: 'heavy drizzle',
+  61: 'slight rain', 63: 'rain', 65: 'heavy rain', 66: 'freezing rain', 67: 'heavy freezing rain',
+  71: 'slight snow', 73: 'snow', 75: 'heavy snow', 77: 'snow grains',
+  80: 'slight showers', 81: 'showers', 82: 'heavy showers',
+  85: 'slight snow showers', 86: 'heavy snow showers',
+  95: 'thunderstorm', 96: 'thunderstorm with hail', 99: 'severe thunderstorm with hail',
+};
+
+// ── Cached IP geolocation ────────────────────────────────
+let _cachedLocation = null;
+let _locationCacheTime = 0;
 
 const CHART_INTENT_PROMPT = `You are a data visualization intent parser. Given a user's request, extract structured intent.
 Return ONLY valid JSON, no explanation. Schema:
@@ -1270,6 +1294,201 @@ function createToolExecutor(baseUrl, ws) {
         }
         // Otherwise just report we found it
         return { found: true, from: original.from, subject: original.subject, threadId: original.threadId };
+      }
+      // ── New Tools ─────────────────────────────────────────
+      case 'system_info': {
+        const totalMem = os.totalmem();
+        const freeMem = os.freemem();
+        const cpuArr = os.cpus();
+        const uptimeSec = os.uptime();
+        const sysD = Math.floor(uptimeSec / 86400);
+        const sysH = Math.floor((uptimeSec % 86400) / 3600);
+        const uptimeHuman = sysD > 0 ? `${sysD} day${sysD > 1 ? 's' : ''}, ${sysH} hour${sysH > 1 ? 's' : ''}` : `${sysH} hour${sysH > 1 ? 's' : ''}`;
+        let disk = null;
+        try {
+          const dfOut = execSync('df -h /').toString();
+          const lines = dfOut.trim().split('\n');
+          if (lines.length >= 2) {
+            const parts = lines[1].split(' ').filter(s => s.length > 0);
+            disk = { total: parts[1], used: parts[2], free: parts[3], percent: parts[4] };
+          }
+        } catch {}
+        return {
+          totalMemoryGB: totalMem / (1024 ** 3), freeMemoryGB: freeMem / (1024 ** 3),
+          cpuCount: cpuArr.length, cpuModel: cpuArr[0]?.model || 'Unknown',
+          uptimeHuman, loadAvg: os.loadavg()[0].toFixed(1), disk,
+        };
+      }
+      case 'clipboard_read': {
+        const clipText = execSync('pbpaste', { encoding: 'utf-8', maxBuffer: 1024 * 1024 });
+        return { text: clipText || '' };
+      }
+      case 'clipboard_write': {
+        const textToWrite = input.text || '';
+        execSync('pbcopy', { input: textToWrite });
+        return { ok: true, length: textToWrite.length };
+      }
+      case 'start_timer': {
+        const secs = input.duration_seconds || 60;
+        const label = input.label || '';
+        const timerId = `timer-${Date.now()}`;
+        const tD = Math.floor(secs / 86400), tH = Math.floor((secs % 86400) / 3600);
+        const tM = Math.floor((secs % 3600) / 60), tS = secs % 60;
+        let durationHuman = '';
+        if (tD > 0) durationHuman += `${tD} day${tD > 1 ? 's' : ''} `;
+        if (tH > 0) durationHuman += `${tH} hour${tH > 1 ? 's' : ''} `;
+        if (tM > 0) durationHuman += `${tM} minute${tM > 1 ? 's' : ''} `;
+        if (tS > 0 && tH === 0 && tD === 0) durationHuman += `${tS} second${tS > 1 ? 's' : ''}`;
+        durationHuman = durationHuman.trim();
+        const timerHandle = setTimeout(async () => {
+          _activeTimers.delete(timerId);
+          const msg = label ? `Timer complete: ${label}` : 'Timer complete';
+          broadcast('alert_status', { level: 'blue', reason: msg });
+          broadcast('status', { message: msg });
+          try { await fetch(`${baseUrl}/api/tts/speak`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text: msg }) }); } catch {}
+          setTimeout(() => broadcast('alert_status', { level: 'normal', reason: 'Timer acknowledged' }), 5000);
+        }, secs * 1000);
+        _activeTimers.set(timerId, { handle: timerHandle, label, endsAt: Date.now() + secs * 1000 });
+        return { ok: true, timerId, durationHuman, label, endsAt: new Date(Date.now() + secs * 1000).toISOString() };
+      }
+      case 'get_weather': {
+        let lat, lon, locationName;
+        if (input.location) {
+          const geoRes = await _fetchWithTimeout(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(input.location)}&count=1`, 5000);
+          const geoData = await geoRes.json();
+          if (geoData.results?.length > 0) { lat = geoData.results[0].latitude; lon = geoData.results[0].longitude; locationName = geoData.results[0].name; }
+          else return { error: `Location not found: ${input.location}` };
+        } else {
+          const now = Date.now();
+          if (!_cachedLocation || now - _locationCacheTime > 3600000) {
+            // Try multiple free geolocation APIs
+            const geoApis = [
+              { url: 'https://ipapi.co/json/', parse: d => ({ lat: d.latitude, lon: d.longitude, city: d.city }) },
+              { url: 'http://ip-api.com/json/', parse: d => ({ lat: d.lat, lon: d.lon, city: d.city }) },
+            ];
+            for (const api of geoApis) {
+              try {
+                const ipRes = await _fetchWithTimeout(api.url, 3000);
+                const ipData = await ipRes.json();
+                const loc = api.parse(ipData);
+                if (loc.lat && loc.lon) { _cachedLocation = loc; _locationCacheTime = now; break; }
+              } catch {}
+            }
+            if (!_cachedLocation) return { error: 'Could not determine location. Try specifying a city.' };
+          }
+          lat = _cachedLocation.lat; lon = _cachedLocation.lon; locationName = _cachedLocation.city;
+        }
+        const wxUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=3`;
+        const wxRes = await _fetchWithTimeout(wxUrl, 5000);
+        const wx = await wxRes.json();
+        const cur = wx.current;
+        const daily = wx.daily;
+        const forecast = daily ? daily.time.map((d, i) => ({ day: d, high: daily.temperature_2m_max[i], low: daily.temperature_2m_min[i], description: WMO_CODES[daily.weather_code[i]] || 'unknown' })) : [];
+        return {
+          current: { temperature: cur.temperature_2m, feelsLike: cur.apparent_temperature, humidity: cur.relative_humidity_2m, wind: cur.wind_speed_10m, description: WMO_CODES[cur.weather_code] || 'unknown' },
+          forecast, location: locationName,
+        };
+      }
+      case 'calculate': {
+        const expr = input.expression || '';
+        const lower = expr.toLowerCase();
+        const currencies = ['usd', 'eur', 'gbp', 'jpy', 'cad', 'aud', 'chf', 'cny', 'inr', 'krw', 'dollars', 'euros', 'pounds', 'yen', 'yuan'];
+        if (currencies.some(c => lower.includes(c))) {
+          try {
+            const llmRes = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model: VOICE_MODEL, stream: false, temperature: 0,
+                messages: [{ role: 'user', content: `Extract from: "${expr}"\nReturn ONLY JSON: {"amount": 500, "from": "EUR", "to": "USD"}\nUse 3-letter ISO codes.` }] }),
+            });
+            const llmData = await llmRes.json();
+            let content = (llmData.choices?.[0]?.message?.content || '').trim();
+            if (content.startsWith('```')) { content = content.slice(content.indexOf('\n') + 1); const last = content.lastIndexOf('```'); if (last !== -1) content = content.slice(0, last); }
+            const parsed = JSON.parse(content.trim());
+            const rateRes = await _fetchWithTimeout(`https://open.er-api.com/v6/latest/${parsed.from}`, 5000);
+            const rateData = await rateRes.json();
+            const rate = rateData.rates?.[parsed.to];
+            if (rate) {
+              const converted = (parsed.amount * rate).toFixed(2);
+              return { result: parseFloat(converted), formatted: `${parsed.amount} ${parsed.from} is approximately ${converted} ${parsed.to}.` };
+            }
+          } catch {}
+          return { error: 'Currency conversion failed' };
+        }
+        // Math: preprocess and evaluate safely
+        let sanitized = expr;
+        // Handle "X% of Y" as a unit before splitting % and "of" separately
+        sanitized = sanitized.split('% of ').join('/100*');
+        sanitized = sanitized.split('%').join('/100');
+        sanitized = sanitized.split(' of ').join('*');
+        sanitized = sanitized.split('^').join('**');
+        sanitized = sanitized.split('sqrt').join('Math.sqrt');
+        sanitized = sanitized.split('abs').join('Math.abs');
+        sanitized = sanitized.split('log').join('Math.log10');
+        sanitized = sanitized.split('PI').join('Math.PI');
+        sanitized = sanitized.split('pi').join('Math.PI');
+        const dangerous = ['import', 'require', 'fetch', 'eval', 'process', 'child', 'exec', 'fs', 'Buffer'];
+        if (dangerous.some(d => sanitized.includes(d))) return { error: 'Expression contains disallowed tokens' };
+        try {
+          const fn = new Function('return ' + sanitized);
+          const val = fn();
+          if (typeof val === 'number' && isFinite(val)) {
+            const display = Number.isInteger(val) ? val.toString() : parseFloat(val.toFixed(4)).toString();
+            return { result: val, expression: expr, formatted: `${expr} equals ${display}.` };
+          }
+        } catch {}
+        return { result: null, expression: expr, formatted: null };
+      }
+      case 'take_screenshot': {
+        const base64 = await captureScreen();
+        if (!base64) return { error: 'Screenshot capture failed' };
+        const shouldDescribe = input.describe !== false;
+        let description = '';
+        if (shouldDescribe) {
+          try {
+            const vr = await analyzeImage(base64, 'image/png', 'Describe what you see on this screen concisely in 2-3 sentences.');
+            description = vr?.text || '';
+          } catch (err) { description = 'Vision analysis unavailable: ' + err.message; }
+        }
+        return { ok: true, description, hasImage: true };
+      }
+      case 'translate_text': {
+        const textToTranslate = input.text || '';
+        const target = input.target_language || 'English';
+        const source = input.source_language || 'English';
+        const trRes = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: VOICE_MODEL, stream: false, temperature: 0,
+            messages: [{ role: 'user', content: `Translate the following ${source} text to ${target}. Return ONLY the translation.\n\nText: ${textToTranslate}` }] }),
+        });
+        const trData = await trRes.json();
+        return { translation: (trData.choices?.[0]?.message?.content || '').trim(), source, target, original: textToTranslate };
+      }
+      case 'manage_schedule': {
+        const action = input.action || 'list';
+        if (action === 'list') return { jobs: listJobs() };
+        if (action === 'add') return { created: await addJob({ name: input.name || 'Unnamed', schedule: input.schedule || '*/5 * * * *', command: input.command || '' }) };
+        if (action === 'remove') return { removed: await removeJob(input.job_id) };
+        if (action === 'toggle') return { toggled: await toggleJob(input.job_id) };
+        return { error: 'Unknown action: ' + action };
+      }
+      case 'check_calendar': {
+        try {
+          const dateStr = input.date || 'today';
+          const now = new Date();
+          let targetDate;
+          if (dateStr === 'today') targetDate = now;
+          else if (dateStr === 'tomorrow') { targetDate = new Date(now); targetDate.setDate(targetDate.getDate() + 1); }
+          else targetDate = new Date(dateStr);
+          const startOfDay = new Date(targetDate); startOfDay.setHours(0, 0, 0, 0);
+          const endOfDay = new Date(targetDate); endOfDay.setHours(23, 59, 59, 999);
+          const events = await calendar.listEvents(startOfDay.toISOString(), endOfDay.toISOString());
+          return { events, date: targetDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) };
+        } catch (err) { return { error: 'Calendar not connected. ' + err.message, events: [] }; }
+      }
+      case 'create_event': {
+        try {
+          return await calendar.createEvent({ summary: input.summary, startTime: input.start_time, durationMinutes: input.duration_minutes || 60, description: input.description });
+        } catch (err) { return { error: 'Calendar not connected. ' + err.message }; }
       }
       default:
         return { error: `Unknown tool: ${toolName}` };

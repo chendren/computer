@@ -333,7 +333,7 @@ export const TOOLS = [
     type: 'function',
     function: {
       name: 'create_reminder',
-      description: 'Set a reminder or alarm. Use when user says "remind me", "set a reminder", "alert me in", "timer for", "notify me at", "schedule".',
+      description: 'Set a reminder or alarm. Use when user says "remind me", "set a reminder", "alert me in", "notify me at".',
       parameters: {
         type: 'object',
         properties: {
@@ -411,6 +411,155 @@ export const TOOLS = [
           body: { type: 'string', description: 'Reply text' },
         },
         required: ['query'],
+      },
+    },
+  },
+  // ── New Tools ─────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'system_info',
+      description: 'Get system information: memory, CPU, disk space, uptime. Use when user says "system info", "how much memory", "disk space", "CPU", "system resources", "how much RAM", "system status".',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'clipboard_read',
+      description: 'Read the current clipboard contents. Use when user says "read clipboard", "what\'s on my clipboard", "clipboard contents", "what did I copy".',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'clipboard_write',
+      description: 'Copy text to the clipboard. Use when user says "copy to clipboard", "copy that", "put on clipboard", "save to clipboard".',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'Text to copy to clipboard' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'start_timer',
+      description: 'Start a countdown timer that announces when done. Use when user says "start a timer", "timer for", "set a timer", "countdown", "time me for". Different from reminders — timers count down and announce completion audibly.',
+      parameters: {
+        type: 'object',
+        properties: {
+          duration_seconds: { type: 'number', description: 'Duration in seconds (e.g. 300 for 5 minutes, 60 for 1 minute)' },
+          label: { type: 'string', description: 'Optional label (e.g. "tea", "break")' },
+        },
+        required: ['duration_seconds'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_weather',
+      description: 'Get current weather and forecast. Use when user says "weather", "temperature", "forecast", "is it going to rain", "how hot", "how cold", "weather in [city]".',
+      parameters: {
+        type: 'object',
+        properties: {
+          location: { type: 'string', description: 'City name (optional, defaults to current location via IP)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'calculate',
+      description: 'Calculate math expressions or convert currency. Use when user says "calculate", "what is X plus Y", "X percent of Y", "convert X to Y", "how much is", "square root", or any arithmetic.',
+      parameters: {
+        type: 'object',
+        properties: {
+          expression: { type: 'string', description: 'Math expression or conversion (e.g. "15% of 4500", "500 EUR to USD", "sqrt(144)")' },
+        },
+        required: ['expression'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'take_screenshot',
+      description: 'Take a screenshot and describe what is on screen. Use when user says "screenshot", "what\'s on my screen", "capture screen", "what am I looking at", "describe my screen".',
+      parameters: {
+        type: 'object',
+        properties: {
+          describe: { type: 'boolean', description: 'Whether to analyze with vision AI (default true)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'translate_text',
+      description: 'Translate text between languages. Use when user says "translate", "how do you say", "in Japanese", "in French", "in Spanish", "in German", or any translation request.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'Text to translate' },
+          target_language: { type: 'string', description: 'Target language (e.g. "Japanese", "French")' },
+        },
+        required: ['text', 'target_language'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'manage_schedule',
+      description: 'List, create, or remove scheduled cron jobs. Use when user says "scheduled jobs", "list schedules", "run every", "recurring task", "cron", "stop the schedule", "scheduled tasks".',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['list', 'add', 'remove', 'toggle'], description: 'Action to perform' },
+          name: { type: 'string', description: 'Job name (for add)' },
+          schedule: { type: 'string', description: 'Cron expression like "*/5 * * * *" (for add)' },
+          command: { type: 'string', description: 'Tool command to run (for add)' },
+          job_id: { type: 'string', description: 'Job ID (for remove/toggle)' },
+        },
+        required: ['action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'check_calendar',
+      description: 'Check calendar events. Use when user says "calendar", "what\'s on my schedule", "meetings today", "any appointments", "am I free at", "what\'s next on my calendar".',
+      parameters: {
+        type: 'object',
+        properties: {
+          date: { type: 'string', description: 'Date to check (e.g. "today", "tomorrow", "2026-03-28")' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_event',
+      description: 'Create a calendar event. Use when user says "schedule a meeting", "add to calendar", "book a", "create an event", "put on my calendar".',
+      parameters: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string', description: 'Event title' },
+          start_time: { type: 'string', description: 'Start time (e.g. "2pm", "14:00")' },
+          duration_minutes: { type: 'number', description: 'Duration in minutes (default 60)' },
+          description: { type: 'string', description: 'Event description (optional)' },
+        },
+        required: ['summary', 'start_time'],
       },
     },
   },
@@ -697,6 +846,40 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   if (!hasChartCall && wantsViz && !wantsEmail) {
     console.log(`[voice-ai] [xLAM] Forcing generate_chart — user request contains visualization keyword`);
     actionToolCalls.push({ name: 'generate_chart', arguments: { query: userText } });
+  }
+
+  // xLAM safety net #3: weather routing.
+  const weatherKw = ['weather', 'temperature', 'forecast', 'is it going to rain', 'how hot', 'how cold'];
+  if (weatherKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'get_weather')) {
+    console.log(`[voice-ai] [xLAM] Forcing get_weather — user request contains weather keyword`);
+    actionToolCalls.push({ name: 'get_weather', arguments: {} });
+  }
+
+  // xLAM safety net #4: timer routing.
+  const timerKw = ['start a timer', 'timer for', 'set a timer', 'countdown', 'time me for'];
+  if (timerKw.some(kw => lowerText.includes(kw)) && !actionToolCalls.some(tc => tc.name === 'start_timer')) {
+    console.log(`[voice-ai] [xLAM] Forcing start_timer — user request contains timer keyword`);
+    actionToolCalls.push({ name: 'start_timer', arguments: { duration_seconds: 60 } });
+  }
+
+  // xLAM safety net #5: system info routing.
+  const sysKeywords = ['system info', 'system resources', 'system status', 'how much memory', 'how much ram', 'disk space', 'cpu usage'];
+  const wantsSys = sysKeywords.some(kw => lowerText.includes(kw));
+  if (wantsSys && !actionToolCalls.some(tc => tc.name === 'system_info')) {
+    console.log(`[voice-ai] [xLAM] Forcing system_info — user request contains system keyword`);
+    actionToolCalls.push({ name: 'system_info', arguments: {} });
+  }
+
+  // xLAM safety net #4: calendar routing.
+  const calendarKeywords = ['calendar', 'schedule a meeting', 'meetings today', 'appointment', 'what\'s on my schedule', 'am i free'];
+  const wantsCalendar = calendarKeywords.some(kw => lowerText.includes(kw));
+  const hasCalendarCall = actionToolCalls.some(tc => tc.name === 'check_calendar' || tc.name === 'create_event');
+  if (wantsCalendar && !hasCalendarCall && !wantsEmail) {
+    const createKw = ['schedule a', 'book a', 'create an event', 'add to calendar', 'put on my calendar'];
+    const wantsCreate = createKw.some(kw => lowerText.includes(kw));
+    const calTool = wantsCreate ? 'create_event' : 'check_calendar';
+    console.log(`[voice-ai] [xLAM] Forcing ${calTool} — user request contains calendar keyword`);
+    actionToolCalls.push({ name: calTool, arguments: wantsCreate ? { summary: userText } : {} });
   }
 
   // Step 2: Execute xLAM-selected tools
@@ -1021,9 +1204,137 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     return { text: spokenText, toolsUsed, panelSwitch };
   }
 
+  // system_info shortcut
+  const sysResult = toolResults.find(tr => tr.tool === 'system_info' && !tr.error);
+  if (sysResult && sysResult.result) {
+    const r = sysResult.result;
+    const memUsed = r.totalMemoryGB - r.freeMemoryGB;
+    let spokenText = `Memory: ${memUsed.toFixed(0)} of ${r.totalMemoryGB.toFixed(0)} GB in use. CPU: ${r.cpuCount} cores, ${r.cpuModel}. Uptime: ${r.uptimeHuman}.`;
+    if (r.disk) spokenText += ` Disk: ${r.disk.free} free of ${r.disk.total}.`;
+    console.log(`[voice-ai] [system-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // clipboard_read shortcut
+  const clipReadResult = toolResults.find(tr => tr.tool === 'clipboard_read' && !tr.error);
+  if (clipReadResult && clipReadResult.result) {
+    const text = clipReadResult.result.text || '';
+    const spokenText = text.length > 0
+      ? `Clipboard contains: ${text.slice(0, 100)}${text.length > 100 ? '... ' + text.length + ' characters total.' : ''}`
+      : 'Clipboard is empty.';
+    console.log(`[voice-ai] [clipboard-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // clipboard_write shortcut
+  const clipWriteResult = toolResults.find(tr => tr.tool === 'clipboard_write' && !tr.error);
+  if (clipWriteResult && clipWriteResult.result) {
+    const spokenText = `Copied to clipboard. ${clipWriteResult.result.length} characters.`;
+    console.log(`[voice-ai] [clipboard-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // start_timer shortcut
+  const timerResult = toolResults.find(tr => tr.tool === 'start_timer' && !tr.error);
+  if (timerResult && timerResult.result) {
+    const spokenText = `Timer set for ${timerResult.result.durationHuman}.`;
+    console.log(`[voice-ai] [timer-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // get_weather shortcut
+  const weatherResult = toolResults.find(tr => tr.tool === 'get_weather' && !tr.error);
+  if (weatherResult && weatherResult.result?.current) {
+    const r = weatherResult.result;
+    const c = r.current;
+    let spokenText = `Currently ${Math.round(c.temperature)} degrees and ${c.description} in ${r.location}.`;
+    if (r.forecast?.length > 0) {
+      const today = r.forecast[0];
+      spokenText += ` High of ${Math.round(today.high)}, low of ${Math.round(today.low)} today.`;
+    }
+    console.log(`[voice-ai] [weather-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // calculate shortcut
+  const calcResult = toolResults.find(tr => tr.tool === 'calculate' && !tr.error);
+  if (calcResult && calcResult.result?.formatted) {
+    const spokenText = calcResult.result.formatted;
+    console.log(`[voice-ai] [calc-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // manage_schedule shortcut
+  const schedResult = toolResults.find(tr => tr.tool === 'manage_schedule' && !tr.error);
+  if (schedResult && schedResult.result) {
+    const r = schedResult.result;
+    let spokenText;
+    if (r.jobs) {
+      if (r.jobs.length === 0) {
+        spokenText = 'No scheduled jobs.';
+      } else {
+        spokenText = `You have ${r.jobs.length} scheduled job${r.jobs.length > 1 ? 's' : ''}. `;
+        spokenText += r.jobs.slice(0, 3).map(j => `${j.name} runs ${j.schedule}`).join('. ') + '.';
+      }
+    } else if (r.created) {
+      spokenText = `Scheduled: ${r.created.name}.`;
+    } else if (r.removed) {
+      spokenText = 'Job removed.';
+    } else if (r.toggled) {
+      spokenText = `Job ${r.toggled.enabled ? 'enabled' : 'disabled'}.`;
+    } else {
+      spokenText = 'Schedule updated.';
+    }
+    console.log(`[voice-ai] [schedule-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch: 'cron' };
+  }
+
+  // check_calendar shortcut
+  const calResult = toolResults.find(tr => tr.tool === 'check_calendar' && !tr.error);
+  if (calResult && calResult.result) {
+    const events = calResult.result.events || [];
+    let spokenText;
+    if (events.length === 0) {
+      spokenText = `No events on your calendar${calResult.result.date ? ' for ' + calResult.result.date : ' today'}.`;
+    } else {
+      spokenText = `You have ${events.length} event${events.length > 1 ? 's' : ''}. `;
+      spokenText += events.slice(0, 4).map(e => `${e.summary} at ${e.startTime}`).join('. ') + '.';
+    }
+    console.log(`[voice-ai] [calendar-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
+  // create_event shortcut
+  const eventResult = toolResults.find(tr => tr.tool === 'create_event' && !tr.error);
+  if (eventResult && eventResult.result) {
+    const r = eventResult.result;
+    const spokenText = r.created
+      ? `Event created: ${r.summary} at ${r.startTime}.`
+      : (r.error || 'Could not create event. Calendar may not be connected.');
+    console.log(`[voice-ai] [event-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
+  }
+
   // For all other tools, ask the response model to generate a spoken answer.
-  // Cap tool results to ~1500 chars total — small models (nemotron 4B) choke on
-  // large prompts and return empty responses. Voice answers should be short anyway.
+  // Cap tool results to ~1500 chars total — small models choke on large prompts.
   let responsePrompt = userText;
   if (toolResults.length > 0) {
     const maxPerTool = Math.floor(1500 / toolResults.length);
