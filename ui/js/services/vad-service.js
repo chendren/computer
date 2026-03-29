@@ -23,9 +23,9 @@
 export class VadService {
   constructor() {
     this.vad = null;        // Silero MicVAD instance (Computer mode only)
-    this.running = false;   // true after start() or startMoshiStream() succeeds
+    this.running = false;   // true after start() or startMoshiStream() or startGeminiStream() succeeds
     this.paused = false;    // true while in SPEAKING/THINKING — suppresses callbacks
-    this.mode = 'computer'; // 'computer' = Silero VAD gated, 'moshi' = continuous Opus
+    this.mode = 'computer'; // 'computer' = Silero VAD gated, 'moshi' = continuous Opus, 'gemini' = continuous PCM
 
     // ── Callbacks (set by VoiceAssistantUI._bindVadCallbacks) ────────────
     this.onSpeechStart = null;  // called when Silero detects speech beginning
@@ -38,6 +38,10 @@ export class VadService {
     this._moshiCtx = null;         // AudioContext running at 24kHz
     this._opusEncoder = null;      // WebCodecs AudioEncoder → Opus frames
     this.onMoshiAudioFrame = null; // callback: receives (Uint8Array opusFrame) per frame
+
+    // ── Gemini mode: raw PCM audio pipeline ──────────────────────────────
+    this._geminiAudio = null;          // GeminiAudio instance
+    this.onGeminiAudioChunk = null;    // callback: receives (Int16Array pcmChunk) per chunk
   }
 
   /**
@@ -187,6 +191,8 @@ export class VadService {
     console.log('[VAD] Stopping');
     if (this.mode === 'moshi') {
       this._stopMoshiStream();
+    } else if (this.mode === 'gemini') {
+      this._stopGeminiStream();
     }
     if (this.vad) {
       this.vad.pause();
@@ -362,6 +368,46 @@ export class VadService {
       this._moshiStream = null;
     }
     console.log('[VAD] Moshi stream stopped');
+  }
+
+  // ── Gemini Mode: Continuous Raw PCM Streaming ───────────────────────────
+
+  /**
+   * Start continuous 16kHz PCM microphone capture for Gemini Live.
+   * Uses GeminiAudio for capture — no Opus encoding needed.
+   * Each PCM chunk fires onGeminiAudioChunk(Int16Array).
+   */
+  /**
+   * @param {number} sampleRate - Capture rate (default 16000 for Gemini, 24000 for OpenAI)
+   */
+  async startGeminiStream(sampleRate = 16000) {
+    if (this._geminiAudio) return; // idempotent
+
+    console.log('[VAD] Starting PCM stream at', sampleRate, 'Hz...');
+
+    const { GeminiAudio } = await import('./gemini-audio.js');
+    this._geminiAudio = new GeminiAudio();
+
+    this._geminiAudio.onChunk = (int16Chunk) => {
+      if (this.onGeminiAudioChunk) {
+        this.onGeminiAudioChunk(int16Chunk);
+      }
+    };
+
+    await this._geminiAudio.startCapture(sampleRate);
+    this.running = true;
+    console.log('[VAD] PCM streaming active at', sampleRate, 'Hz');
+  }
+
+  /**
+   * Tear down the Gemini audio pipeline and release resources.
+   */
+  _stopGeminiStream() {
+    if (this._geminiAudio) {
+      this._geminiAudio.stopCapture();
+      this._geminiAudio = null;
+    }
+    console.log('[VAD] Gemini stream stopped');
   }
 
   /**

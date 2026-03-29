@@ -1,6 +1,13 @@
 /**
  * Cron scheduler — local job scheduling with config in data/cron.json.
  * Uses setInterval with minute-level granularity. No external dependencies.
+ *
+ * Command format:
+ *   "tool_name:json_input"  — executes a voice assistant tool
+ *     e.g. "web_search:{"query":"weather forecast"}"
+ *     e.g. "create_log:{"text":"Hourly health check","category":"technical"}"
+ *     e.g. "check_email:{}"
+ *   ""  (empty) — notification-only, broadcasts cron_event without execution
  */
 import fs from 'fs/promises';
 import path from 'path';
@@ -10,6 +17,7 @@ let cronPath;
 let jobs = [];
 let checkInterval = null;
 let broadcastFn = null;
+let toolExecutorFn = null;
 
 export async function initCron(pluginRoot, broadcast) {
   cronPath = path.join(pluginRoot, 'data', 'cron.json');
@@ -28,6 +36,14 @@ export async function initCron(pluginRoot, broadcast) {
   checkInterval = setInterval(_checkJobs, 60000);
 }
 
+/**
+ * Register the tool executor so cron jobs can call voice assistant tools.
+ * Called from index.js after WebSocket initialization.
+ */
+export function setCronToolExecutor(executor) {
+  toolExecutorFn = executor;
+}
+
 export function listJobs() {
   return jobs.map(j => ({
     id: j.id,
@@ -35,6 +51,8 @@ export function listJobs() {
     schedule: j.schedule,
     enabled: j.enabled !== false,
     lastRun: j.lastRun || null,
+    lastResult: j.lastResult || null,
+    command: j.command || '',
     nextDescription: j.description || '',
   }));
 }
@@ -48,6 +66,7 @@ export async function addJob(job) {
     command: job.command || '',
     description: job.description || '',
     lastRun: null,
+    lastResult: null,
   };
   jobs.push(newJob);
   await _persist();
@@ -84,16 +103,117 @@ function _checkJobs() {
 
     if (_matchesCron(job.schedule, minute, hour, dayOfMonth, month, dayOfWeek)) {
       job.lastRun = now.toISOString();
+
+      // Execute command if present
+      if (job.command) {
+        _executeCommand(job).catch(err => {
+          console.error(`[cron] Command failed for "${job.name}":`, err.message);
+        });
+      }
+
       if (broadcastFn) {
-        broadcastFn('cron_event', { jobId: job.id, name: job.name, status: 'fired', timestamp: job.lastRun });
+        broadcastFn('cron_event', {
+          jobId: job.id,
+          name: job.name,
+          status: job.command ? 'executing' : 'fired',
+          timestamp: job.lastRun,
+        });
       }
     }
   }
 }
 
 /**
+ * Execute a cron job command. Format: "tool_name:json_input"
+ */
+async function _executeCommand(job) {
+  const cmd = job.command.trim();
+  if (!cmd) return;
+
+  const colonIdx = cmd.indexOf(':');
+  let toolName, input;
+
+  if (colonIdx === -1) {
+    // Bare tool name with no input, e.g. "check_email"
+    toolName = cmd;
+    input = {};
+  } else {
+    toolName = cmd.slice(0, colonIdx).trim();
+    const inputStr = cmd.slice(colonIdx + 1).trim();
+    try {
+      input = inputStr ? JSON.parse(inputStr) : {};
+    } catch {
+      console.error(`[cron] Invalid JSON in command for "${job.name}": ${inputStr}`);
+      job.lastResult = { error: 'Invalid JSON in command', timestamp: new Date().toISOString() };
+      return;
+    }
+  }
+
+  if (!toolExecutorFn) {
+    console.error('[cron] Tool executor not registered — command skipped');
+    job.lastResult = { error: 'Tool executor not available', timestamp: new Date().toISOString() };
+    return;
+  }
+
+  try {
+    const result = await toolExecutorFn(toolName, input);
+    job.lastResult = {
+      ok: true,
+      tool: toolName,
+      timestamp: new Date().toISOString(),
+      summary: _summarizeResult(result),
+    };
+
+    if (broadcastFn) {
+      broadcastFn('cron_event', {
+        jobId: job.id,
+        name: job.name,
+        status: 'completed',
+        tool: toolName,
+        result: job.lastResult.summary,
+        timestamp: job.lastResult.timestamp,
+      });
+    }
+  } catch (err) {
+    job.lastResult = {
+      ok: false,
+      tool: toolName,
+      error: err.message,
+      timestamp: new Date().toISOString(),
+    };
+
+    if (broadcastFn) {
+      broadcastFn('cron_event', {
+        jobId: job.id,
+        name: job.name,
+        status: 'error',
+        error: err.message,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  }
+
+  // Persist lastResult
+  _persist().catch(() => {});
+}
+
+function _summarizeResult(result) {
+  if (!result) return 'No result';
+  if (result.error) return 'Error: ' + result.error;
+  if (typeof result === 'string') return result.slice(0, 200);
+  // Try common fields
+  if (result.text) return String(result.text).slice(0, 200);
+  if (result.summary) return String(result.summary).slice(0, 200);
+  if (result.ok) return 'OK';
+  if (result.sent) return 'Sent';
+  // Fallback: compact JSON
+  const str = JSON.stringify(result);
+  return str.length > 200 ? str.slice(0, 197) + '...' : str;
+}
+
+/**
  * Simple cron expression matcher: "min hour dom month dow"
- * Supports: numbers, *, and comma-separated values. No regex.
+ * Supports: numbers, *, comma-separated, ranges, and steps. No regex.
  */
 function _matchesCron(schedule, minute, hour, dayOfMonth, month, dayOfWeek) {
   const parts = schedule.trim().split(' ');

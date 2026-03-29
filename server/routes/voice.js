@@ -1,21 +1,25 @@
 /**
- * Voice Route — Voice assistant status and Moshi lifecycle control.
+ * Voice Route — Voice assistant status and sidecar lifecycle control.
+ *
+ * STT: Voxtral Mini 3B via mlx-audio (local, Metal GPU, port 8997)
+ * TTS: Kokoro 82M via kokoro-js (local, ONNX, in-process)
+ * S2S: Moshi MLX (local, full-duplex, port 8998)
  *
  * Endpoints:
- *   GET  /api/voice/status       — voice assistant availability and Moshi status
+ *   GET  /api/voice/status       — voice assistant availability and sidecar status
  *   GET  /api/voice/config       — client configuration (wake word, VAD thresholds, modes)
  *   GET  /api/voice/moshi/status — detailed Moshi sidecar status
  *   POST /api/voice/moshi/start  — start the Moshi MLX Python sidecar process
  *   POST /api/voice/moshi/stop   — stop the Moshi sidecar process
- *
- * The /config endpoint is fetched by the browser client on startup to configure
- * the VAD sensitivity thresholds. The values here should match what VadService
- * uses internally — if they diverge, update vad-service.js to fetch from this endpoint.
  */
 
 import { Router } from 'express';
 import { isVoiceAvailable } from '../services/voice-assistant.js';
 import { getMoshiStatus, startMoshi, stopMoshi, isMoshiRunning } from '../services/moshi.js';
+import { getVoxtralSTTStatus } from '../services/voxtral-stt.js';
+import { getGeminiStatus, isGeminiAvailable } from '../services/gemini-live.js';
+import { getOpenAIRealtimeStatus } from '../services/openai-realtime.js';
+import { getNovaSonicStatus } from '../services/nova-sonic.js';
 
 const router = Router();
 
@@ -38,8 +42,13 @@ router.get('/status', async (req, res) => {
     },
     provider: 'ollama',
     architecture: 'dual-model',
-    features: ['deterministic_routing', 'tool_use', 'conversation_history', 'tts', 'panel_switching', 'moshi_speech_to_speech'],
+    features: ['deterministic_routing', 'tool_use', 'conversation_history', 'tts', 'panel_switching', 'moshi_speech_to_speech', 'gemini_live_s2s'],
+    stt: { provider: 'voxtral', ...getVoxtralSTTStatus() },
+    tts: { provider: 'kokoro', source: 'local' },
     moshi,
+    gemini: getGeminiStatus(),
+    openai: getOpenAIRealtimeStatus(),
+    nova: getNovaSonicStatus(),
   });
 });
 
@@ -66,7 +75,10 @@ router.get('/config', (req, res) => {
     },
     modes: {
       moshi: { description: 'Full-duplex speech-to-speech via Moshi (~200ms latency)', default: true },
-      computer: { description: 'Tool-augmented voice commands via xLAM + Llama Scout' },
+      computer: { description: 'Tool-augmented voice commands via Voxtral STT → xLAM + Llama Scout → Kokoro TTS' },
+      gemini: { description: 'Gemini 3.1 Flash Live — cloud S2S with native tool calling' },
+      openai: { description: 'OpenAI Realtime — GPT-4o S2S with semantic VAD and tool calling' },
+      nova: { description: 'Nova Sonic — Amazon Bedrock S2S with polyglot voices and tool calling' },
     },
   });
 });
@@ -91,6 +103,24 @@ router.post('/moshi/start', async (req, res) => {
 router.post('/moshi/stop', (req, res) => {
   stopMoshi();
   res.json({ ok: true, ...getMoshiStatus() });
+});
+
+// ── Gemini Control ──────────────────────────────────────
+
+router.get('/gemini/status', (req, res) => {
+  res.json(getGeminiStatus());
+});
+
+// ── OpenAI Realtime Control ─────────────────────────────
+
+router.get('/openai/status', (req, res) => {
+  res.json(getOpenAIRealtimeStatus());
+});
+
+// ── Nova Sonic Control ──────────────────────────────────
+
+router.get('/nova/status', (req, res) => {
+  res.json(getNovaSonicStatus());
 });
 
 export default router;

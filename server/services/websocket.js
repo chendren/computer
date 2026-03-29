@@ -2,7 +2,7 @@
  * WebSocket Service — Real-time bidirectional communication hub.
  *
  * Responsibilities:
- *   1. Voice pipeline routing: binary audio → Whisper STT (Computer mode)
+ *   1. Voice pipeline routing: binary audio → Voxtral STT (Computer mode)
  *      or binary audio → Moshi bridge (Moshi mode)
  *   2. Command processing: text commands → voice-assistant.js dual-model pipeline
  *   3. Moshi bridge: proxy Opus audio and text tokens between browser and Moshi MLX
@@ -19,47 +19,43 @@ import { transcribeChunk } from './transcription.js';
 import { getAuthToken } from '../middleware/auth.js';
 import { processVoiceCommand, isVoiceAvailable, ensureVoiceChecked } from './voice-assistant.js';
 import { createMoshiBridge, isMoshiRunning, KIND_AUDIO } from './moshi.js';
+import { createGeminiBridge, isGeminiAvailable, KIND_GEMINI } from './gemini-live.js';
+import { createOpenAIRealtimeBridge, isOpenAIRealtimeAvailable, KIND_OPENAI } from './openai-realtime.js';
+import { createNovaSonicBridge, isNovaSonicAvailable, KIND_NOVA } from './nova-sonic.js';
 
 const clients = new Set();
-// Per-client state: { voiceMode: 'moshi'|'computer', moshiBridge, moshiTextBuffer }
+// Per-client state: { voiceMode: 'moshi'|'computer'|'gemini'|'openai'|'nova', bridges + text buffers }
 const clientState = new Map();
 
-// Limit concurrent Whisper transcription processes to 1 at a time.
-// Whisper is CPU/GPU-intensive — running multiple instances causes memory pressure
-// and degraded performance. Extra chunks are queued (max 3) and processed sequentially.
-let whisperBusy = false;
-const whisperQueue = [];
+// Limit concurrent Voxtral transcription to 1 at a time.
+// Voxtral runs on Metal GPU — concurrent requests cause memory pressure.
+// Extra chunks are queued (max 3) and processed sequentially.
+let sttBusy = false;
+const sttQueue = [];
 
 /**
- * Process an audio chunk through Whisper STT.
+ * Process an audio chunk through Voxtral STT.
  *
- * Because Whisper is heavyweight, we serialize transcription requests:
- *   - If Whisper is idle: run immediately
- *   - If Whisper is busy: queue the chunk (max 3 queued — older ones are dropped)
- *   - The queue drains automatically as each transcription finishes
- *
- * Dropping excess chunks is intentional: if the user spoke for a long time
- * and Whisper is behind, older chunks are less relevant than recent ones.
+ * Serialized: only one transcription at a time, excess chunks queued (max 3).
+ * Older chunks are dropped if queue is full — recent speech matters more.
  *
  * @param {WebSocket} ws - Client WebSocket to send stt_result/stt_error back to
  * @param {Buffer} audioBuffer - Raw audio bytes (WAV, WebM, or other detected format)
  */
 async function processChunk(ws, audioBuffer) {
-  console.log(`[ws] processChunk: ${audioBuffer.length} bytes, whisperBusy: ${whisperBusy}, queue: ${whisperQueue.length}`);
-  if (whisperBusy) {
-    if (whisperQueue.length < 3) {
-      whisperQueue.push({ ws, audioBuffer });
-      console.log('[ws] Queued chunk (whisper busy)');
+  console.log(`[ws] processChunk: ${audioBuffer.length} bytes, sttBusy: ${sttBusy}, queue: ${sttQueue.length}`);
+  if (sttBusy) {
+    if (sttQueue.length < 3) {
+      sttQueue.push({ ws, audioBuffer });
+      console.log('[ws] Queued chunk (STT busy)');
     } else {
-      // Drop it — better to lose an old chunk than build up a backlog
       console.log('[ws] Dropped chunk (queue full)');
     }
     return;
   }
 
-  whisperBusy = true;
+  sttBusy = true;
   try {
-    // Detect WAV vs webm from buffer header
     const format = detectAudioFormat(audioBuffer);
     console.log(`[ws] Transcribing chunk: format=${format}, size=${audioBuffer.length}`);
     const text = await transcribeChunk(audioBuffer, format);
@@ -74,10 +70,9 @@ async function processChunk(ws, audioBuffer) {
       ws.send(JSON.stringify({ type: 'stt_error', data: { error: err.message } }));
     }
   } finally {
-    whisperBusy = false;
-    // Process next queued chunk
-    if (whisperQueue.length > 0) {
-      const next = whisperQueue.shift();
+    sttBusy = false;
+    if (sttQueue.length > 0) {
+      const next = sttQueue.shift();
       processChunk(next.ws, next.audioBuffer).catch(err => {
         console.error('[ws] Queued chunk processing error:', err.message);
       });
@@ -928,6 +923,13 @@ async function _smartChartExecutor(input, broadcastFn) {
  * Create a tool executor that maps voice-assistant tool calls
  * to internal API endpoints via localhost fetch.
  */
+/**
+ * Create a tool executor that broadcasts to all clients (for cron, API use).
+ */
+export function createGlobalToolExecutor(baseUrl) {
+  return createToolExecutor(baseUrl, null);
+}
+
 function createToolExecutor(baseUrl, ws) {
   return async (toolName, input) => {
     try {
@@ -1074,8 +1076,8 @@ function createToolExecutor(baseUrl, ws) {
         return { transcripts, logs };
       }
       case 'generate_chart': {
-        // Scope chart to requesting client, not all clients
-        const clientBroadcast = (type, data) => sendTo(ws, type, data);
+        // Scope chart to requesting client if available, otherwise broadcast to all
+        const clientBroadcast = ws ? (type, data) => sendTo(ws, type, data) : broadcast;
         return await _smartChartExecutor(input, clientBroadcast);
       }
       case 'browse_url': {
@@ -1335,9 +1337,173 @@ async function connectMoshiBridge(ws, state, baseUrl, sessionId) {
 }
 
 /**
+ * Connect a client to Gemini Live via the @google/genai SDK bridge.
+ */
+async function connectGeminiBridge(ws, state, baseUrl, sessionId) {
+  if (state.geminiBridge && state.geminiBridge.isOpen()) {
+    return true; // Already connected
+  }
+
+  if (!isGeminiAvailable()) {
+    sendTo(ws, 'gemini_error', { error: 'GEMINI_API_KEY not set' });
+    return false;
+  }
+
+  const toolExecutor = createToolExecutor(baseUrl, ws);
+  const bridge = createGeminiBridge({ toolExecutor });
+
+  // Relay Gemini audio responses back to browser as raw PCM with 0x03 prefix
+  bridge.onAudio((pcmBuffer) => {
+    if (ws.readyState === 1 && state.voiceMode === 'gemini') {
+      const frame = Buffer.alloc(1 + pcmBuffer.length);
+      frame[0] = KIND_GEMINI;
+      pcmBuffer.copy(frame, 1);
+      ws.send(frame);
+    }
+  });
+
+  // Relay Gemini text transcripts to browser
+  bridge.onText((text) => {
+    state.geminiTextBuffer += text;
+    sendTo(ws, 'gemini_text', { text, fullText: state.geminiTextBuffer });
+  });
+
+  // Relay tool call events to browser for UI feedback
+  bridge.onToolCall((calls) => {
+    const names = calls.map(c => c.name);
+    sendTo(ws, 'gemini_tool_call', { tools: names });
+    console.log('[ws] Gemini tool calls:', names.join(', '));
+  });
+
+  bridge.onClose(() => {
+    state.geminiBridge = null;
+    sendTo(ws, 'voice_mode_changed', { mode: 'computer', reason: 'gemini_disconnected' });
+  });
+
+  try {
+    await bridge.connect();
+    state.geminiBridge = bridge;
+    state.geminiTextBuffer = '';
+    console.log('[ws] Gemini bridge connected for client');
+    return true;
+  } catch (err) {
+    console.error('[ws] Gemini bridge connection failed: ' + err.message);
+    sendTo(ws, 'gemini_error', { error: 'Failed to connect to Gemini: ' + err.message });
+    return false;
+  }
+}
+
+/**
  * Temporarily switch to Computer mode to process a tool command,
  * then switch back to Moshi mode.
  */
+/**
+ * Connect a client to OpenAI Realtime via the openai SDK bridge.
+ */
+async function connectOpenAIBridge(ws, state, baseUrl, sessionId) {
+  if (state.openAIBridge && state.openAIBridge.isOpen()) {
+    return true;
+  }
+
+  if (!isOpenAIRealtimeAvailable()) {
+    sendTo(ws, 'openai_error', { error: 'OPENAI_API_KEY not set' });
+    return false;
+  }
+
+  const toolExecutor = createToolExecutor(baseUrl, ws);
+  const bridge = createOpenAIRealtimeBridge({ toolExecutor });
+
+  // Relay audio responses back to browser with 0x04 prefix
+  bridge.onAudio((pcmBuffer) => {
+    if (ws.readyState === 1 && state.voiceMode === 'openai') {
+      const frame = Buffer.alloc(1 + pcmBuffer.length);
+      frame[0] = KIND_OPENAI;
+      pcmBuffer.copy(frame, 1);
+      ws.send(frame);
+    }
+  });
+
+  bridge.onText((text) => {
+    state.openAITextBuffer += text;
+    sendTo(ws, 'openai_text', { text, fullText: state.openAITextBuffer });
+  });
+
+  bridge.onToolCall((calls) => {
+    const names = calls.map(c => c.name);
+    sendTo(ws, 'openai_tool_call', { tools: names });
+    console.log('[ws] OpenAI tool calls:', names.join(', '));
+  });
+
+  bridge.onClose(() => {
+    state.openAIBridge = null;
+    sendTo(ws, 'voice_mode_changed', { mode: 'computer', reason: 'openai_disconnected' });
+  });
+
+  try {
+    await bridge.connect();
+    state.openAIBridge = bridge;
+    state.openAITextBuffer = '';
+    console.log('[ws] OpenAI Realtime bridge connected for client');
+    return true;
+  } catch (err) {
+    console.error('[ws] OpenAI bridge connection failed: ' + err.message);
+    sendTo(ws, 'openai_error', { error: 'Failed to connect to OpenAI: ' + err.message });
+    return false;
+  }
+}
+
+/**
+ * Connect a client to Nova Sonic via Bedrock bidirectional streaming.
+ */
+async function connectNovaBridge(ws, state, baseUrl, sessionId) {
+  if (state.novaBridge && state.novaBridge.isOpen()) return true;
+
+  if (!isNovaSonicAvailable()) {
+    sendTo(ws, 'nova_error', { error: 'AWS credentials not configured' });
+    return false;
+  }
+
+  const toolExecutor = createToolExecutor(baseUrl, ws);
+  const bridge = createNovaSonicBridge({ toolExecutor });
+
+  bridge.onAudio((pcmBuffer) => {
+    if (ws.readyState === 1 && state.voiceMode === 'nova') {
+      const frame = Buffer.alloc(1 + pcmBuffer.length);
+      frame[0] = KIND_NOVA;
+      pcmBuffer.copy(frame, 1);
+      ws.send(frame);
+    }
+  });
+
+  bridge.onText((text) => {
+    state.novaTextBuffer += text;
+    sendTo(ws, 'nova_text', { text, fullText: state.novaTextBuffer });
+  });
+
+  bridge.onToolCall((calls) => {
+    const names = calls.map(c => c.name);
+    sendTo(ws, 'nova_tool_call', { tools: names });
+    console.log('[ws] Nova tool calls:', names.join(', '));
+  });
+
+  bridge.onClose(() => {
+    state.novaBridge = null;
+    sendTo(ws, 'voice_mode_changed', { mode: 'computer', reason: 'nova_disconnected' });
+  });
+
+  try {
+    await bridge.connect();
+    state.novaBridge = bridge;
+    state.novaTextBuffer = '';
+    console.log('[ws] Nova Sonic bridge connected for client');
+    return true;
+  } catch (err) {
+    console.error('[ws] Nova bridge connection failed: ' + err.message);
+    sendTo(ws, 'nova_error', { error: 'Failed to connect to Nova Sonic: ' + err.message });
+    return false;
+  }
+}
+
 async function switchToComputerMode(ws, state, sessionId, command, baseUrl) {
   state.voiceMode = 'computer';
   sendTo(ws, 'voice_mode_changed', { mode: 'computer', reason: 'wake_word', command });
@@ -1363,21 +1529,26 @@ export function initWebSocket(wss, baseUrl) {
     const sessionId = `ws-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     // Initialize per-client state
-    const state = { voiceMode: 'computer', moshiBridge: null, moshiTextBuffer: '' };
+    const state = { voiceMode: 'computer', moshiBridge: null, moshiTextBuffer: '', geminiBridge: null, geminiTextBuffer: '', openAIBridge: null, openAITextBuffer: '', novaBridge: null, novaTextBuffer: '' };
     clientState.set(ws, state);
 
     clients.add(ws);
     ws.on('close', () => {
       clients.delete(ws);
-      // Clean up Moshi bridge
       const s = clientState.get(ws);
       if (s?.moshiBridge) { s.moshiBridge.close(); }
+      if (s?.geminiBridge) { s.geminiBridge.close(); }
+      if (s?.openAIBridge) { s.openAIBridge.close(); }
+      if (s?.novaBridge) { s.novaBridge.close(); }
       clientState.delete(ws);
     });
     ws.on('error', () => {
       clients.delete(ws);
       const s = clientState.get(ws);
       if (s?.moshiBridge) { s.moshiBridge.close(); }
+      if (s?.geminiBridge) { s.geminiBridge.close(); }
+      if (s?.openAIBridge) { s.openAIBridge.close(); }
+      if (s?.novaBridge) { s.novaBridge.close(); }
       clientState.delete(ws);
     });
 
@@ -1393,6 +1564,33 @@ export function initWebSocket(wss, baseUrl) {
           } else {
             // Raw audio without prefix — forward as-is
             state.moshiBridge.sendAudio(buf);
+          }
+          return;
+        }
+        // In Gemini mode, forward raw PCM to Gemini bridge
+        if (state.voiceMode === 'gemini' && state.geminiBridge && state.geminiBridge.isOpen()) {
+          if (buf.length > 1 && buf[0] === KIND_GEMINI) {
+            state.geminiBridge.sendAudio(buf.slice(1));
+          } else {
+            state.geminiBridge.sendAudio(buf);
+          }
+          return;
+        }
+        // In OpenAI mode, forward raw PCM to OpenAI Realtime bridge
+        if (state.voiceMode === 'openai' && state.openAIBridge && state.openAIBridge.isOpen()) {
+          if (buf.length > 1 && buf[0] === KIND_OPENAI) {
+            state.openAIBridge.sendAudio(buf.slice(1));
+          } else {
+            state.openAIBridge.sendAudio(buf);
+          }
+          return;
+        }
+        // In Nova mode, forward raw PCM to Nova Sonic bridge
+        if (state.voiceMode === 'nova' && state.novaBridge && state.novaBridge.isOpen()) {
+          if (buf.length > 1 && buf[0] === KIND_NOVA) {
+            state.novaBridge.sendAudio(buf.slice(1));
+          } else {
+            state.novaBridge.sendAudio(buf);
           }
           return;
         }
@@ -1424,6 +1622,8 @@ export function initWebSocket(wss, baseUrl) {
           case 'voice_mode': {
             const requestedMode = msg.data?.mode;
             if (requestedMode === 'moshi') {
+              // Disconnect Gemini bridge if switching from gemini
+              if (state.geminiBridge) { state.geminiBridge.close(); state.geminiBridge = null; }
               connectMoshiBridge(ws, state, baseUrl, sessionId).then(ok => {
                 if (ok) {
                   state.voiceMode = 'moshi';
@@ -1435,12 +1635,46 @@ export function initWebSocket(wss, baseUrl) {
             } else if (requestedMode === 'computer') {
               state.voiceMode = 'computer';
               // Disconnect Moshi bridge if connected
-              if (state.moshiBridge) {
-                state.moshiBridge.close();
-                state.moshiBridge = null;
-              }
+              if (state.moshiBridge) { state.moshiBridge.close(); state.moshiBridge = null; }
+              // Disconnect Gemini bridge if connected
+              if (state.geminiBridge) { state.geminiBridge.close(); state.geminiBridge = null; }
               sendTo(ws, 'voice_mode_changed', { mode: 'computer' });
               console.log('[ws] Switched to Computer mode');
+            } else if (requestedMode === 'gemini') {
+              if (state.moshiBridge) { state.moshiBridge.close(); state.moshiBridge = null; }
+              if (state.openAIBridge) { state.openAIBridge.close(); state.openAIBridge = null; }
+              connectGeminiBridge(ws, state, baseUrl, sessionId).then(ok => {
+                if (ok) {
+                  state.voiceMode = 'gemini';
+                  state.geminiTextBuffer = '';
+                  sendTo(ws, 'voice_mode_changed', { mode: 'gemini' });
+                  console.log('[ws] Switched to Gemini mode');
+                }
+              });
+            } else if (requestedMode === 'openai') {
+              if (state.moshiBridge) { state.moshiBridge.close(); state.moshiBridge = null; }
+              if (state.geminiBridge) { state.geminiBridge.close(); state.geminiBridge = null; }
+              if (state.novaBridge) { state.novaBridge.close(); state.novaBridge = null; }
+              connectOpenAIBridge(ws, state, baseUrl, sessionId).then(ok => {
+                if (ok) {
+                  state.voiceMode = 'openai';
+                  state.openAITextBuffer = '';
+                  sendTo(ws, 'voice_mode_changed', { mode: 'openai' });
+                  console.log('[ws] Switched to OpenAI Realtime mode');
+                }
+              });
+            } else if (requestedMode === 'nova') {
+              if (state.moshiBridge) { state.moshiBridge.close(); state.moshiBridge = null; }
+              if (state.geminiBridge) { state.geminiBridge.close(); state.geminiBridge = null; }
+              if (state.openAIBridge) { state.openAIBridge.close(); state.openAIBridge = null; }
+              connectNovaBridge(ws, state, baseUrl, sessionId).then(ok => {
+                if (ok) {
+                  state.voiceMode = 'nova';
+                  state.novaTextBuffer = '';
+                  sendTo(ws, 'voice_mode_changed', { mode: 'nova' });
+                  console.log('[ws] Switched to Nova Sonic mode');
+                }
+              });
             }
             break;
           }
@@ -1459,16 +1693,25 @@ export function initWebSocket(wss, baseUrl) {
             });
             sendTo(ws, 'status', { message: 'Voice assistant active' });
             break;
+          case 'gemini_activity':
+            // Explicit VAD signals from the client for Gemini mode
+            if (state.geminiBridge && state.geminiBridge.isOpen()) {
+              if (msg.data?.action === 'start') {
+                state.geminiBridge.activityStart();
+              } else if (msg.data?.action === 'end') {
+                state.geminiBridge.activityEnd();
+              }
+            }
+            break;
           case 'voice_cancel':
             console.log('[ws] voice_cancel received');
-            // Disconnect the Moshi WebSocket bridge but intentionally do NOT reset
-            // state.voiceMode. The client is still in Moshi mode — the next voice_start
-            // will reconnect the bridge. Resetting the mode here would cause the client
-            // to fall back to Computer mode unexpectedly after cancelling.
-            if (state.moshiBridge) {
-              state.moshiBridge.close();
-              state.moshiBridge = null;
-            }
+            // Disconnect bridges but intentionally do NOT reset state.voiceMode.
+            // The client is still in its current mode — the next voice_start
+            // will reconnect the bridge.
+            if (state.moshiBridge) { state.moshiBridge.close(); state.moshiBridge = null; }
+            if (state.geminiBridge) { state.geminiBridge.close(); state.geminiBridge = null; }
+            if (state.openAIBridge) { state.openAIBridge.close(); state.openAIBridge = null; }
+            if (state.novaBridge) { state.novaBridge.close(); state.novaBridge = null; }
             sendTo(ws, 'status', { message: 'Voice assistant inactive' });
             break;
           default:

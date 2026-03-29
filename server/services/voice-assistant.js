@@ -35,7 +35,7 @@ const sessions = new Map();
 const MAX_HISTORY = 20;
 const SESSION_TTL = 4 * 60 * 60 * 1000; // 4 hours — full shift
 
-function getSystemPrompt() {
+export function getSystemPrompt() {
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
@@ -65,7 +65,7 @@ IMPORTANT: Any request involving charts, graphs, plots, tables, visualizations, 
 }
 
 // OpenAI-compatible tool definitions
-const TOOLS = [
+export const TOOLS = [
   {
     type: 'function',
     function: {

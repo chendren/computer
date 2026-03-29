@@ -27,6 +27,7 @@
  */
 
 import { VadService } from '../services/vad-service.js';
+import { GeminiAudio } from '../services/gemini-audio.js';
 
 // All possible states. The current state:
 //   - Sets the data-state CSS attribute on the voice button (controls appearance)
@@ -40,7 +41,10 @@ const STATES = {
   THINKING: 'thinking',       // AI processing the command (xLAM routing + tool calls)
   SPEAKING: 'speaking',       // TTS audio is playing back
   ERROR: 'error',             // Failed to start — auto-resets to IDLE after 8 seconds
-  MOSHI_ACTIVE: 'moshi_active', // Moshi mode: full-duplex conversation active
+  MOSHI_ACTIVE: 'moshi_active',   // Moshi mode: full-duplex conversation active
+  GEMINI_ACTIVE: 'gemini_active', // Gemini mode: cloud S2S conversation active
+  OPENAI_ACTIVE: 'openai_active', // OpenAI Realtime mode: cloud S2S conversation active
+  NOVA_ACTIVE: 'nova_active',     // Nova Sonic mode: AWS S2S conversation active
 };
 
 const WAKE_WORD = 'computer';
@@ -93,10 +97,14 @@ export class VoiceAssistantUI {
     this.ws = ws;             // WebSocketClient — send/receive server events
     this.audio = audioPlayer; // AudioPlayer — TTS playback and Moshi audio
     this.statusBar = statusBar; // LCARS status bar element
-    this.vad = new VadService(); // Silero VAD + Opus streaming
+    this.vad = new VadService(); // Silero VAD + Opus streaming + Gemini PCM
+    this.geminiAudio = new GeminiAudio(); // Gemini PCM playback
     this.state = STATES.IDLE;
     this.voiceMode = 'moshi'; // Start in Moshi mode — falls back to Computer if Moshi is unavailable
     this.moshiTranscript = ''; // Accumulates Moshi text tokens for display
+    this.geminiTranscript = ''; // Accumulates Gemini text tokens for display
+    this.openaiTranscript = ''; // Accumulates OpenAI Realtime text tokens
+    this.novaTranscript = '';   // Accumulates Nova Sonic text tokens
 
     console.log('[VoiceUI] Constructing');
 
@@ -151,7 +159,9 @@ export class VoiceAssistantUI {
    * The server responds with 'voice_mode_changed' confirming the new mode.
    */
   _toggleMode() {
-    const newMode = this.voiceMode === 'moshi' ? 'computer' : 'moshi';
+    // 5-way cycle: MOSHI → CMD → GEMINI → OPENAI → NOVA → MOSHI
+    const cycle = { moshi: 'computer', computer: 'gemini', gemini: 'openai', openai: 'nova', nova: 'moshi' };
+    const newMode = cycle[this.voiceMode] || 'moshi';
     this._wsSend('voice_mode', { mode: newMode });
   }
 
@@ -168,9 +178,18 @@ export class VoiceAssistantUI {
     if (mode === 'moshi') {
       this.modeButton.textContent = 'MOSHI';
       this.modeButton.title = 'Voice Mode: Moshi (full-duplex) — click for Computer mode';
+    } else if (mode === 'gemini') {
+      this.modeButton.textContent = 'GEMINI';
+      this.modeButton.title = 'Voice Mode: Gemini Live (cloud S2S) — click for OpenAI mode';
+    } else if (mode === 'openai') {
+      this.modeButton.textContent = 'OPENAI';
+      this.modeButton.title = 'Voice Mode: OpenAI Realtime (cloud S2S) — click for Nova mode';
+    } else if (mode === 'nova') {
+      this.modeButton.textContent = 'NOVA';
+      this.modeButton.title = 'Voice Mode: Nova Sonic (AWS S2S) — click for Moshi mode';
     } else {
       this.modeButton.textContent = 'CMD';
-      this.modeButton.title = 'Voice Mode: Computer (commands) — click for Moshi mode';
+      this.modeButton.title = 'Voice Mode: Computer (commands) — click for Gemini mode';
     }
     console.log('[VoiceUI] Voice mode:', mode);
   }
@@ -199,6 +218,12 @@ export class VoiceAssistantUI {
     try {
       if (this.voiceMode === 'moshi') {
         await this._activateMoshi();
+      } else if (this.voiceMode === 'gemini') {
+        await this._activateGemini();
+      } else if (this.voiceMode === 'openai') {
+        await this._activateOpenAI();
+      } else if (this.voiceMode === 'nova') {
+        await this._activateNova();
       } else {
         await this._activateComputer();
       }
@@ -263,18 +288,134 @@ export class VoiceAssistantUI {
   }
 
   /**
+   * Start Gemini Live mode — initialize raw PCM capture and playback.
+   * No Opus encoding needed — Gemini speaks raw PCM natively.
+   */
+  async _activateGemini() {
+    // Initialize PCM playback for Gemini's audio responses
+    this.geminiAudio.startPlayback();
+    // Initialize mic PCM capture for Gemini input
+    await this.vad.startGeminiStream();
+
+    // Track speech state for explicit VAD signaling
+    this._geminiSpeaking = false;
+    this._geminiSilenceTimer = null;
+
+    // Forward each captured PCM chunk to the server with the 0x03 kind byte prefix
+    this.vad.onGeminiAudioChunk = (int16Chunk) => {
+      const bytes = new Uint8Array(int16Chunk.buffer);
+
+      // Simple energy-based VAD: detect if this chunk contains speech
+      // (sum of absolute sample values above threshold = speech)
+      let energy = 0;
+      for (let i = 0; i < int16Chunk.length; i++) {
+        energy += Math.abs(int16Chunk[i]);
+      }
+      const avgEnergy = energy / int16Chunk.length;
+      const hasSpeech = avgEnergy > 200; // threshold for 16-bit PCM
+
+      if (hasSpeech && !this._geminiSpeaking) {
+        // Speech started — signal activityStart
+        this._geminiSpeaking = true;
+        this._wsSend('gemini_activity', { action: 'start' });
+        if (this._geminiSilenceTimer) { clearTimeout(this._geminiSilenceTimer); this._geminiSilenceTimer = null; }
+      } else if (!hasSpeech && this._geminiSpeaking) {
+        // Silence detected — wait 600ms before signaling end (debounce)
+        if (!this._geminiSilenceTimer) {
+          this._geminiSilenceTimer = setTimeout(() => {
+            this._geminiSpeaking = false;
+            this._wsSend('gemini_activity', { action: 'end' });
+            this._geminiSilenceTimer = null;
+          }, 600);
+        }
+      } else if (hasSpeech && this._geminiSilenceTimer) {
+        // Speech resumed during silence debounce — cancel the end signal
+        clearTimeout(this._geminiSilenceTimer);
+        this._geminiSilenceTimer = null;
+      }
+
+      const frame = new Uint8Array(1 + bytes.length);
+      frame[0] = 0x03; // kind byte: raw PCM (server routes this to Gemini)
+      frame.set(bytes, 1);
+      this.ws.sendBinary(frame.buffer);
+    };
+
+    this._setState(STATES.GEMINI_ACTIVE);
+    this._wsSend('voice_mode', { mode: 'gemini' }); // tells server to connect Gemini bridge
+    this.geminiTranscript = '';
+    this.button.title = 'Gemini Live active — click to stop';
+    this._showStatus('Gemini: active — speak naturally');
+    console.log('[VoiceUI] Activated, GEMINI_ACTIVE');
+  }
+
+  /**
+   * Start OpenAI Realtime mode — 24kHz PCM capture and playback.
+   * OpenAI has built-in semantic VAD — no manual activity signals needed.
+   */
+  async _activateOpenAI() {
+    // Reuse GeminiAudio for PCM playback (already 24kHz)
+    this.geminiAudio.startPlayback();
+    // Start mic capture at 24kHz (OpenAI's native rate, unlike Gemini's 16kHz)
+    await this.vad.startGeminiStream(24000);
+
+    this.vad.onGeminiAudioChunk = (int16Chunk) => {
+      const bytes = new Uint8Array(int16Chunk.buffer);
+      const frame = new Uint8Array(1 + bytes.length);
+      frame[0] = 0x04; // kind byte: OpenAI Realtime PCM
+      frame.set(bytes, 1);
+      this.ws.sendBinary(frame.buffer);
+    };
+
+    this._setState(STATES.OPENAI_ACTIVE);
+    this._wsSend('voice_mode', { mode: 'openai' });
+    this.openaiTranscript = '';
+    this.button.title = 'OpenAI Realtime active — click to stop';
+    this._showStatus('OpenAI: active — speak naturally');
+    console.log('[VoiceUI] Activated, OPENAI_ACTIVE');
+  }
+
+  /**
+   * Start Nova Sonic mode — 16kHz PCM capture, 24kHz playback (same as Gemini).
+   * Nova has built-in VAD via Bedrock bidirectional streaming.
+   */
+  async _activateNova() {
+    this.geminiAudio.startPlayback();
+    await this.vad.startGeminiStream(16000); // Nova uses 16kHz input like Gemini
+
+    this.vad.onGeminiAudioChunk = (int16Chunk) => {
+      const bytes = new Uint8Array(int16Chunk.buffer);
+      const frame = new Uint8Array(1 + bytes.length);
+      frame[0] = 0x05; // kind byte: Nova Sonic PCM
+      frame.set(bytes, 1);
+      this.ws.sendBinary(frame.buffer);
+    };
+
+    this._setState(STATES.NOVA_ACTIVE);
+    this._wsSend('voice_mode', { mode: 'nova' });
+    this.novaTranscript = '';
+    this.button.title = 'Nova Sonic active — click to stop';
+    this._showStatus('Nova: active — speak naturally');
+    console.log('[VoiceUI] Activated, NOVA_ACTIVE');
+  }
+
+  /**
    * Stop all voice processing and return to IDLE.
-   * Releases mic, stops audio, sends voice_cancel to disconnect Moshi bridge.
+   * Releases mic, stops audio, sends voice_cancel to disconnect bridges.
    */
   deactivate() {
     console.log('[VoiceUI] Deactivating');
-    this.vad.stop();              // release mic and destroy VAD or Opus encoder
+    this.vad.stop();              // release mic and destroy VAD, Opus encoder, or Gemini capture
     this.audio.stop();            // stop any currently playing TTS audio
     this.audio.stopMoshiStream(); // release WebCodecs decoder and AudioContext
+    this.geminiAudio.stopPlayback(); // release Gemini PCM playback
+    this.geminiAudio.stopCapture();  // release Gemini PCM capture if active
     this._setState(STATES.IDLE);
-    this._wsSend('voice_cancel', {});  // tells server to disconnect Moshi bridge
+    this._wsSend('voice_cancel', {});  // tells server to disconnect bridges
     this.button.title = 'Voice Assistant — click to start';
     this.moshiTranscript = '';
+    this.geminiTranscript = '';
+    this.openaiTranscript = '';
+    this.novaTranscript = '';
   }
 
   _wsSend(type, data) {
@@ -313,12 +454,12 @@ export class VoiceAssistantUI {
 
     if (newState === STATES.SPEAKING || newState === STATES.THINKING) {
       // Pause microphone while the assistant is talking or thinking
-      // Prevents the assistant from transcribing its own TTS output or sending
-      // Opus frames to Moshi while a Computer command is being processed
       this.vad.pause();
-    } else if (newState === STATES.LISTENING || newState === STATES.MOSHI_ACTIVE) {
+      if (this.geminiAudio) this.geminiAudio.pause();
+    } else if (newState === STATES.LISTENING || newState === STATES.MOSHI_ACTIVE || newState === STATES.GEMINI_ACTIVE || newState === STATES.OPENAI_ACTIVE || newState === STATES.NOVA_ACTIVE) {
       // Resume mic when returning to an input-ready state
       this.vad.resume();
+      if (this.geminiAudio) this.geminiAudio.resume();
     }
   }
 
@@ -443,7 +584,8 @@ export class VoiceAssistantUI {
       console.error('[VoiceUI] voice_error:', data.error);
       this.statusBar?.setActivity('Voice error: ' + data.error);
       if (this.state !== STATES.IDLE) {
-        this._setState(this.voiceMode === 'moshi' ? STATES.MOSHI_ACTIVE : STATES.LISTENING);
+        const activeState = { moshi: STATES.MOSHI_ACTIVE, gemini: STATES.GEMINI_ACTIVE, openai: STATES.OPENAI_ACTIVE, nova: STATES.NOVA_ACTIVE };
+        this._setState(activeState[this.voiceMode] || STATES.LISTENING);
       }
     });
 
@@ -481,17 +623,29 @@ export class VoiceAssistantUI {
       this._setVoiceMode(data.mode);
 
       if (data.reason === 'wake_word') {
-        // Moshi detected "Computer" in its text stream → processing the command
         this._showStatus('Wake word detected: switching to Computer mode...');
         this._setState(STATES.THINKING);
       } else if (data.reason === 'command_complete') {
-        // Computer command finished → resume Moshi full-duplex conversation
         this._showStatus('Moshi: active — speak naturally');
         this._setState(STATES.MOSHI_ACTIVE);
       } else if (data.reason === 'moshi_disconnected') {
-        // Moshi WebSocket closed unexpectedly → fall back gracefully
         this._showStatus('Moshi disconnected — Computer mode');
         if (this.state === STATES.MOSHI_ACTIVE) {
+          this._setState(STATES.LISTENING);
+        }
+      } else if (data.reason === 'gemini_disconnected') {
+        this._showStatus('Gemini disconnected — Computer mode');
+        if (this.state === STATES.GEMINI_ACTIVE) {
+          this._setState(STATES.LISTENING);
+        }
+      } else if (data.reason === 'openai_disconnected') {
+        this._showStatus('OpenAI disconnected — Computer mode');
+        if (this.state === STATES.OPENAI_ACTIVE) {
+          this._setState(STATES.LISTENING);
+        }
+      } else if (data.reason === 'nova_disconnected') {
+        this._showStatus('Nova disconnected — Computer mode');
+        if (this.state === STATES.NOVA_ACTIVE) {
           this._setState(STATES.LISTENING);
         }
       }
@@ -507,6 +661,90 @@ export class VoiceAssistantUI {
       console.error('[VoiceUI] moshi_error:', data.error);
       this._showStatus('Moshi error: ' + data.error);
       // Moshi failed — fall back to Computer mode so voice still functions
+      this._setVoiceMode('computer');
+    });
+
+    // ── Gemini mode handlers ────────────────────────────────────────────────
+
+    // Raw PCM audio from Gemini — play directly (no Opus decoding needed)
+    this.ws.on('gemini_audio_frame', (pcmPayload) => {
+      if (this.voiceMode === 'gemini') {
+        this.geminiAudio.playPcmChunk(pcmPayload);
+      }
+    });
+
+    // Incremental text transcript from Gemini
+    this.ws.on('gemini_text', (data) => {
+      if (data.text) {
+        this.geminiTranscript = data.fullText || (this.geminiTranscript + data.text);
+        this._showStatus('Gemini: ' + this.geminiTranscript.slice(-80));
+      }
+    });
+
+    // Tool call feedback from Gemini
+    this.ws.on('gemini_tool_call', (data) => {
+      if (data.tools) {
+        this._showStatus('Gemini tools: ' + data.tools.join(', '));
+      }
+    });
+
+    this.ws.on('gemini_error', (data) => {
+      console.error('[VoiceUI] gemini_error:', data.error);
+      this._showStatus('Gemini error: ' + data.error);
+      this._setVoiceMode('computer');
+    });
+
+    // ── OpenAI Realtime mode handlers ─────────────────────────────────────
+
+    this.ws.on('openai_audio_frame', (pcmPayload) => {
+      if (this.voiceMode === 'openai') {
+        this.geminiAudio.playPcmChunk(pcmPayload);
+      }
+    });
+
+    this.ws.on('openai_text', (data) => {
+      if (data.text) {
+        this.openaiTranscript = data.fullText || (this.openaiTranscript + data.text);
+        this._showStatus('OpenAI: ' + this.openaiTranscript.slice(-80));
+      }
+    });
+
+    this.ws.on('openai_tool_call', (data) => {
+      if (data.tools) {
+        this._showStatus('OpenAI tools: ' + data.tools.join(', '));
+      }
+    });
+
+    this.ws.on('openai_error', (data) => {
+      console.error('[VoiceUI] openai_error:', data.error);
+      this._showStatus('OpenAI error: ' + data.error);
+      this._setVoiceMode('computer');
+    });
+
+    // ── Nova Sonic mode handlers ──────────────────────────────────────────
+
+    this.ws.on('nova_audio_frame', (pcmPayload) => {
+      if (this.voiceMode === 'nova') {
+        this.geminiAudio.playPcmChunk(pcmPayload);
+      }
+    });
+
+    this.ws.on('nova_text', (data) => {
+      if (data.text) {
+        this.novaTranscript = data.fullText || (this.novaTranscript + data.text);
+        this._showStatus('Nova: ' + this.novaTranscript.slice(-80));
+      }
+    });
+
+    this.ws.on('nova_tool_call', (data) => {
+      if (data.tools) {
+        this._showStatus('Nova tools: ' + data.tools.join(', '));
+      }
+    });
+
+    this.ws.on('nova_error', (data) => {
+      console.error('[VoiceUI] nova_error:', data.error);
+      this._showStatus('Nova error: ' + data.error);
       this._setVoiceMode('computer');
     });
   }
@@ -525,7 +763,8 @@ export class VoiceAssistantUI {
     this.audio.onPlaybackEnd = () => {
       console.log('[VoiceUI] playback ended, state:', this.state);
       if (this.state === STATES.SPEAKING) {
-        this._setState(this.voiceMode === 'moshi' ? STATES.MOSHI_ACTIVE : STATES.LISTENING);
+        const activeState = { moshi: STATES.MOSHI_ACTIVE, gemini: STATES.GEMINI_ACTIVE, openai: STATES.OPENAI_ACTIVE, nova: STATES.NOVA_ACTIVE };
+        this._setState(activeState[this.voiceMode] || STATES.LISTENING);
       }
     };
   }

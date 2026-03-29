@@ -12,6 +12,7 @@
  *   Binary: 1-byte kind prefix + raw payload
  *     0x01 = Opus audio frame from Moshi → routed to 'moshi_audio_frame'
  *     0x02 = UTF-8 text token from Moshi → routed to 'moshi_text_frame'
+ *     0x03 = Raw PCM Int16 audio from Gemini → routed to 'gemini_audio_frame'
  *
  * Usage:
  *   const ws = new WebSocketClient('ws://localhost:3141?token=abc');
@@ -54,6 +55,15 @@ export class WebSocketClient {
         } else if (kind === 0x02) {
           // Text token — append to the on-screen Moshi transcript
           this.emit('moshi_text_frame', new TextDecoder().decode(payload));
+        } else if (kind === 0x03) {
+          // Raw PCM Int16 audio from Gemini Live — play directly (no codec)
+          this.emit('gemini_audio_frame', payload);
+        } else if (kind === 0x04) {
+          // Raw PCM Int16 audio from OpenAI Realtime — play directly (no codec)
+          this.emit('openai_audio_frame', payload);
+        } else if (kind === 0x05) {
+          // Raw PCM Int16 audio from Nova Sonic — play directly (no codec)
+          this.emit('nova_audio_frame', payload);
         }
         return;
       }

@@ -2437,9 +2437,33 @@
 }
 
 /* ── Cron Panel ── */
+.cron-submit-form {
+  padding: 8px 0;
+}
+.cron-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+.cron-schedule-field {
+  max-width: 180px;
+  font-family: 'Courier New', monospace;
+}
+.cron-schedule-hint {
+  font-size: 11px;
+  color: var(--lcars-text-dim);
+  margin-top: 2px;
+}
+.cron-schedule-hint code {
+  color: var(--lcars-light-blue);
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+}
+
 .cron-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 8px;
   margin-bottom: 12px;
 }
@@ -2457,6 +2481,13 @@
   opacity: 0.6;
 }
 
+.cron-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
 .cron-name {
   font-family: var(--lcars-font);
   font-size: 14px;
@@ -2464,7 +2495,6 @@
   letter-spacing: 1px;
   text-transform: uppercase;
   color: var(--lcars-orange);
-  margin-bottom: 4px;
 }
 
 .cron-schedule {
@@ -2472,6 +2502,32 @@
   font-size: 13px;
   color: var(--lcars-light-blue);
   margin-bottom: 4px;
+}
+
+.cron-command {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: var(--lcars-peach);
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+
+.cron-desc {
+  font-size: 12px;
+  color: var(--lcars-text-dim);
+  margin-bottom: 4px;
+}
+
+.cron-last-result {
+  font-size: 11px;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.cron-last-run {
+  font-size: 11px;
+  color: var(--lcars-text-dim);
+  margin-bottom: 6px;
 }
 
 .cron-status {
@@ -2484,6 +2540,11 @@
 }
 
 .cron-card.paused .cron-status { color: var(--lcars-text-dim); }
+
+.cron-actions {
+  display: flex;
+  gap: 6px;
+}
 
 .cron-event-log {
   flex: 1;
