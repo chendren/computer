@@ -1615,7 +1615,7 @@ export function initWebSocket(wss, baseUrl) {
                   sendTo(ws, 'voice_error', { error: err.message || 'Voice processing failed' });
                 });
               } else if (!available) {
-                sendTo(ws, 'voice_error', { error: 'Ollama not available or required models not found. Need: ' + (process.env.VOICE_MODEL || 'llama4:scout') + ' and ' + (process.env.ACTION_MODEL || 'xLAM F16') });
+                sendTo(ws, 'voice_error', { error: 'Ollama not available or required models not found. Need: ' + (process.env.VOICE_MODEL || 'qwen3.5:9b') + ' and ' + (process.env.ACTION_MODEL || 'llama3-groq-tool-use:8b') });
               }
             });
             break;
