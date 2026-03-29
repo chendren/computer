@@ -474,30 +474,23 @@ async function _fetchFinancialPrice(name) {
 }
 
 /**
- * Generate time-series chart data for a financial asset.
+ * Fetch actual historical prices for a financial asset by searching the web
+ * for price history and extracting daily values with LLM.
  *
- * IMPORTANT: The historical price data is SIMULATED using a random walk.
- * We have the real live price (from Swissquote or Google Finance), but
- * historical tick data requires paid API access. Instead, we generate a
- * plausible-looking price history that ends at the actual current price.
+ * Strategy:
+ *   1. Bulk search: "[asset] price history [date range] daily" → LLM extracts prices
+ *   2. Per-day fallback: search each day individually if bulk fails
+ *   3. Today always uses the live API price
  *
- * The simulation uses realistic volatility per asset class:
- *   Crypto (BTC, ETH, DOGE): ±4% daily volatility
- *   Metals (gold, silver): ±1.5% daily volatility
- *   Equities: ±2% daily volatility
- *
- * The chart title clearly labels this as "simulated trend" so users are not misled.
- * The current price label in the spoken response is always live data.
- *
- * @param {number} currentPrice - Live price from API (accurate)
- * @param {{ count: number, unit: string }} timeRange - How many units of history to show
- * @param {string} assetName - Asset name for volatility classification
- * @returns {{ labels: string[], data: number[] }} Chart-ready data ending at currentPrice
+ * @param {number} currentPrice - Today's live price from API
+ * @param {{ count: number, unit: string }} timeRange - How many units of history
+ * @param {string} assetName - Asset name (e.g. "silver", "gold", "bitcoin")
+ * @returns {{ labels: string[], data: number[] }} Chart-ready data with real prices
  */
-function _generatePriceSeries(currentPrice, timeRange, assetName) {
+async function _fetchHistoricalPrices(currentPrice, timeRange, assetName) {
   const { count, unit } = timeRange;
   const now = new Date();
-  const labels = [];
+  const dates = [];
 
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date(now);
@@ -507,26 +500,173 @@ function _generatePriceSeries(currentPrice, timeRange, assetName) {
     else if (unit === 'year') d.setFullYear(d.getFullYear() - i);
     else if (unit === 'hour') d.setHours(d.getHours() - i);
     else if (unit === 'quarter') d.setMonth(d.getMonth() - i * 3);
-
-    if (unit === 'hour') labels.push(d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
-    else if (unit === 'year') labels.push(d.getFullYear().toString());
-    else if (unit === 'quarter') labels.push(`Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`);
-    else labels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+    dates.push(d);
   }
 
-  const cryptoNames = ['bitcoin', 'btc', 'ethereum', 'eth', 'doge', 'sol'];
-  const isCrypto = cryptoNames.some(c => assetName.toLowerCase().includes(c));
-  const isMetal = Object.keys(METAL_SYMBOLS).some(m => assetName.toLowerCase().includes(m));
-  const dailyVol = currentPrice * (isCrypto ? 0.04 : isMetal ? 0.015 : 0.02);
-  const data = [];
-  let price = currentPrice - (dailyVol * count * 0.3);
-  for (let i = 0; i < count; i++) {
-    price += (Math.random() - 0.4) * dailyVol;
-    data.push(parseFloat(price.toFixed(2)));
+  const labels = dates.map(d => {
+    if (unit === 'hour') return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    if (unit === 'year') return d.getFullYear().toString();
+    if (unit === 'quarter') return `Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`;
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  });
+
+  const dateLabels = dates.map(d => d.toISOString().split('T')[0]);
+  const startDate = dateLabels[0];
+  const endDate = dateLabels[dateLabels.length - 1];
+  // Strip "price" from asset name to avoid "silver price price history"
+  const cleanName = assetName.toLowerCase().includes('price')
+    ? assetName.toLowerCase().split('price')[0].trim()
+    : assetName;
+  const searchQuery = `${cleanName} price history ${startDate} to ${endDate} daily`;
+  console.log(`[chart] Fetching historical prices: "${searchQuery}"`);
+
+  try {
+    const searchResult = await _webSearch(searchQuery);
+    const pages = [];
+    for (const r of (searchResult.searchResults || []).slice(0, 2)) {
+      if (!r.url) continue;
+      try {
+        const page = await _webFetch(r.url);
+        if (page.content) pages.push(page.content);
+      } catch {}
+    }
+
+    if (pages.length > 0) {
+      const combinedText = pages.join('\n\n').slice(0, 4000);
+
+      const extractPrompt = `Extract the ${assetName} price for each of these specific dates from the text below.
+Return ONLY valid JSON, no explanation:
+{"prices": [{"date": "YYYY-MM-DD", "price": 123.45}, ...]}
+
+Dates needed: ${dateLabels.join(', ')}
+
+Rules:
+- Use the closing price or spot price for each date
+- If a date falls on a weekend, use the nearest trading day price
+- price must be a number, not a string
+- Return only dates that have actual data in the text
+
+Text:
+${combinedText}`;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 20000);
+      const res = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: VOICE_MODEL,
+          messages: [{ role: 'user', content: extractPrompt }],
+          stream: false,
+          temperature: 0,
+        }),
+      });
+      clearTimeout(timeout);
+
+      const llmData = await res.json();
+      const content = (llmData.choices?.[0]?.message?.content || '').trim();
+      // Strip markdown code fences if present
+      let jsonStr = content;
+      if (jsonStr.startsWith('```')) {
+        const firstNewline = jsonStr.indexOf('\n');
+        jsonStr = jsonStr.slice(firstNewline + 1);
+        const lastFence = jsonStr.lastIndexOf('```');
+        if (lastFence !== -1) jsonStr = jsonStr.slice(0, lastFence);
+      }
+      jsonStr = jsonStr.trim();
+      const parsed = JSON.parse(jsonStr);
+
+      if (parsed.prices?.length > 0) {
+        const data = dates.map(d => {
+          const iso = d.toISOString().split('T')[0];
+          const match = parsed.prices.find(p => p.date === iso);
+          return match ? parseFloat(match.price) : null;
+        });
+
+        // Today always uses live price
+        data[data.length - 1] = currentPrice;
+        // Fill gaps with nearest known value
+        for (let i = data.length - 2; i >= 0; i--) {
+          if (data[i] === null) data[i] = data[i + 1];
+        }
+
+        const actualCount = parsed.prices.length;
+        console.log(`[chart] Historical prices extracted: ${actualCount}/${count} days from web`);
+        return { labels, data };
+      }
+    }
+  } catch (err) {
+    console.warn(`[chart] Bulk historical price fetch failed: ${err.message}`);
   }
+
+  // Per-day fallback: search for each day individually
+  console.log(`[chart] Falling back to per-day price search`);
+  const data = new Array(count).fill(null);
   data[data.length - 1] = currentPrice;
 
+  const pastDays = dates.slice(0, -1);
+  const BATCH_SIZE = 3;
+  for (let batch = 0; batch < pastDays.length; batch += BATCH_SIZE) {
+    const batchDays = pastDays.slice(batch, batch + BATCH_SIZE);
+    const results = await Promise.allSettled(batchDays.map(async (d, batchIdx) => {
+      const dateStr = d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+      const q = `${assetName} spot price on ${dateStr}`;
+      try {
+        const sr = await _webSearch(q);
+        for (const r of (sr.searchResults || [])) {
+          const snippet = (r.snippet || '') + ' ' + (r.title || '');
+          const price = _extractDollarPrice(snippet);
+          if (price !== null) {
+            console.log(`[chart] ${assetName} on ${dateStr}: $${price}`);
+            return { idx: batch + batchIdx, price };
+          }
+        }
+      } catch {}
+      return { idx: batch + batchIdx, price: null };
+    }));
+
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value.price !== null) {
+        data[r.value.idx] = r.value.price;
+      }
+    }
+  }
+
+  // Fill remaining gaps
+  for (let i = data.length - 2; i >= 0; i--) {
+    if (data[i] === null) data[i] = data[i + 1];
+  }
+
+  const foundCount = data.filter(v => v !== null).length;
+  console.log(`[chart] Per-day search: found ${foundCount}/${count} prices`);
   return { labels, data };
+}
+
+/**
+ * Extract a dollar price from text using string methods (no regex).
+ * Scans for $ followed by digits and dots.
+ */
+function _extractDollarPrice(text) {
+  let idx = 0;
+  while (idx < text.length) {
+    const dollarIdx = text.indexOf('$', idx);
+    if (dollarIdx === -1) break;
+    let numStr = '';
+    let j = dollarIdx + 1;
+    while (j < text.length) {
+      const ch = text[j];
+      if ((ch >= '0' && ch <= '9') || ch === '.') { numStr += ch; j++; }
+      else if (ch === ',') { j++; } // skip commas in numbers
+      else break;
+    }
+    if (numStr.length >= 2 && numStr.includes('.')) {
+      const val = parseFloat(numStr);
+      if (!isNaN(val) && val > 0) return val;
+    }
+    idx = dollarIdx + 1;
+  }
+  return null;
 }
 
 /**
@@ -732,25 +872,30 @@ async function _smartChartExecutor(input, broadcastFn) {
     if (fp) { financialHits.push({ subject: subj, ...fp }); sources.push(fp.source); }
   }
 
-  // All subjects are financial → build visualization
+  // All subjects are financial → fetch actual historical prices and build visualization
   if (financialHits.length === subjects.length && financialHits.length > 0) {
     const range = timeRange || { count: 7, unit: 'day' };
     if (!chartType) chartType = 'line';
 
-    // Generate price series for each subject
+    // Fetch real historical prices for each subject
     const seriesData = [];
     let labels = null;
     for (const fh of financialHits) {
-      const ts = _generatePriceSeries(fh.price, range, fh.subject);
+      const ts = await _fetchHistoricalPrices(fh.price, range, fh.subject);
       if (!labels) labels = ts.labels;
-      seriesData.push({ name: fh.subject.charAt(0).toUpperCase() + fh.subject.slice(1), data: ts.data, price: fh.price });
+      const name = fh.subject.charAt(0).toUpperCase() + fh.subject.slice(1);
+      seriesData.push({ name, data: ts.data, price: fh.price });
     }
 
+    const rangeLabel = `Last ${range.count} ${range.unit}${range.count > 1 ? 's' : ''}`;
+    const firstName = seriesData[0].name;
+    // Avoid "Silver price Price" — only append Price if name doesn't already contain it
+    const titleName = firstName.toLowerCase().includes('price') ? firstName : `${firstName} Price`;
     const title = seriesData.length > 1
-      ? `${seriesData.map(d => d.name).join(' vs ')} — Last ${range.count} ${range.unit}${range.count > 1 ? 's' : ''} (simulated trend)`
-      : `${seriesData[0].name} Price — Last ${range.count} ${range.unit}${range.count > 1 ? 's' : ''} (simulated trend, current price live)`;
+      ? `${seriesData.map(d => d.name).join(' vs ')} — ${rangeLabel}`
+      : `${titleName} — ${rangeLabel}`;
 
-    // Table mode: build tabular data instead of chart
+    // Table mode
     if (chartType === 'table') {
       const headers = ['Date', ...seriesData.map(d => d.name)];
       const rows = labels.map((lbl, i) =>
