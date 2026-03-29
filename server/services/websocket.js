@@ -367,6 +367,33 @@ const TICKER_MAP = {
   solana: 'SOL-USD', sol: 'SOL-USD',
 };
 
+// Yahoo Finance symbols — used for historical price data
+const YAHOO_SYMBOLS = {
+  gold: 'GC=F', silver: 'SI=F', platinum: 'PL=F', palladium: 'PA=F',
+  amazon: 'AMZN', amzn: 'AMZN', apple: 'AAPL', aapl: 'AAPL',
+  google: 'GOOGL', googl: 'GOOGL', alphabet: 'GOOGL',
+  microsoft: 'MSFT', msft: 'MSFT', tesla: 'TSLA', tsla: 'TSLA',
+  nvidia: 'NVDA', nvda: 'NVDA', meta: 'META', amd: 'AMD',
+  netflix: 'NFLX', nflx: 'NFLX',
+  bitcoin: 'BTC-USD', btc: 'BTC-USD', ethereum: 'ETH-USD', eth: 'ETH-USD',
+  dogecoin: 'DOGE-USD', doge: 'DOGE-USD', solana: 'SOL-USD', sol: 'SOL-USD',
+};
+
+/**
+ * Resolve a Yahoo Finance symbol from an asset name.
+ * Checks both exact matches and partial matches (e.g. "silver spot price" → "SI=F").
+ */
+function _resolveYahooSymbol(assetName) {
+  const key = assetName.toLowerCase().trim();
+  // Exact match
+  if (YAHOO_SYMBOLS[key]) return YAHOO_SYMBOLS[key];
+  // Partial match — check if any key is contained in the asset name
+  for (const [name, symbol] of Object.entries(YAHOO_SYMBOLS)) {
+    if (key.includes(name)) return symbol;
+  }
+  return null;
+}
+
 const CHART_INTENT_PROMPT = `You are a data visualization intent parser. Given a user's request, extract structured intent.
 Return ONLY valid JSON, no explanation. Schema:
 {
@@ -474,15 +501,12 @@ async function _fetchFinancialPrice(name) {
 }
 
 /**
- * Fetch actual historical prices for a financial asset by searching the web
- * for price history and extracting daily values with LLM.
+ * Fetch actual historical prices via Yahoo Finance API.
  *
- * Strategy:
- *   1. Bulk search: "[asset] price history [date range] daily" → LLM extracts prices
- *   2. Per-day fallback: search each day individually if bulk fails
- *   3. Today always uses the live API price
+ * Yahoo Finance provides real daily close prices for stocks, crypto,
+ * metals futures, and more. This replaces the old simulated random walk.
  *
- * @param {number} currentPrice - Today's live price from API
+ * @param {number} currentPrice - Today's live price (used as fallback for today)
  * @param {{ count: number, unit: string }} timeRange - How many units of history
  * @param {string} assetName - Asset name (e.g. "silver", "gold", "bitcoin")
  * @returns {{ labels: string[], data: number[] }} Chart-ready data with real prices
@@ -490,8 +514,9 @@ async function _fetchFinancialPrice(name) {
 async function _fetchHistoricalPrices(currentPrice, timeRange, assetName) {
   const { count, unit } = timeRange;
   const now = new Date();
-  const dates = [];
 
+  // Build expected date labels
+  const dates = [];
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date(now);
     if (unit === 'day') d.setDate(d.getDate() - i);
@@ -510,163 +535,71 @@ async function _fetchHistoricalPrices(currentPrice, timeRange, assetName) {
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   });
 
-  const dateLabels = dates.map(d => d.toISOString().split('T')[0]);
-  const startDate = dateLabels[0];
-  const endDate = dateLabels[dateLabels.length - 1];
-  // Strip "price" from asset name to avoid "silver price price history"
-  const cleanName = assetName.toLowerCase().includes('price')
-    ? assetName.toLowerCase().split('price')[0].trim()
-    : assetName;
-  const searchQuery = `${cleanName} price history ${startDate} to ${endDate} daily`;
-  console.log(`[chart] Fetching historical prices: "${searchQuery}"`);
+  // Map time range to Yahoo Finance range parameter
+  const rangeMap = { hour: '1d', day: '1mo', week: '3mo', month: '1y', quarter: '5y', year: '10y' };
+  const yahooRange = rangeMap[unit] || '1mo';
+  const intervalMap = { hour: '1h', day: '1d', week: '1wk', month: '1mo', quarter: '3mo', year: '1mo' };
+  const yahooInterval = intervalMap[unit] || '1d';
 
-  try {
-    const searchResult = await _webSearch(searchQuery);
-    const pages = [];
-    for (const r of (searchResult.searchResults || []).slice(0, 2)) {
-      if (!r.url) continue;
-      try {
-        const page = await _webFetch(r.url);
-        if (page.content) pages.push(page.content);
-      } catch {}
-    }
+  const yahooSymbol = _resolveYahooSymbol(assetName);
+  if (yahooSymbol) {
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?range=${yahooRange}&interval=${yahooInterval}`;
+      console.log(`[chart] Yahoo Finance: ${url}`);
+      const res = await _fetchWithTimeout(url, 8000);
+      const json = await res.json();
+      const result = json.chart?.result?.[0];
 
-    if (pages.length > 0) {
-      const combinedText = pages.join('\n\n').slice(0, 4000);
+      if (result?.timestamp?.length > 0) {
+        const timestamps = result.timestamp;
+        const closes = result.indicators?.quote?.[0]?.close || [];
 
-      const extractPrompt = `Extract the ${assetName} price for each of these specific dates from the text below.
-Return ONLY valid JSON, no explanation:
-{"prices": [{"date": "YYYY-MM-DD", "price": 123.45}, ...]}
-
-Dates needed: ${dateLabels.join(', ')}
-
-Rules:
-- Use the closing price or spot price for each date
-- If a date falls on a weekend, use the nearest trading day price
-- price must be a number, not a string
-- Return only dates that have actual data in the text
-
-Text:
-${combinedText}`;
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 20000);
-      const res = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: VOICE_MODEL,
-          messages: [{ role: 'user', content: extractPrompt }],
-          stream: false,
-          temperature: 0,
-        }),
-      });
-      clearTimeout(timeout);
-
-      const llmData = await res.json();
-      const content = (llmData.choices?.[0]?.message?.content || '').trim();
-      // Strip markdown code fences if present
-      let jsonStr = content;
-      if (jsonStr.startsWith('```')) {
-        const firstNewline = jsonStr.indexOf('\n');
-        jsonStr = jsonStr.slice(firstNewline + 1);
-        const lastFence = jsonStr.lastIndexOf('```');
-        if (lastFence !== -1) jsonStr = jsonStr.slice(0, lastFence);
-      }
-      jsonStr = jsonStr.trim();
-      const parsed = JSON.parse(jsonStr);
-
-      if (parsed.prices?.length > 0) {
-        const data = dates.map(d => {
-          const iso = d.toISOString().split('T')[0];
-          const match = parsed.prices.find(p => p.date === iso);
-          return match ? parseFloat(match.price) : null;
-        });
-
-        // Today always uses live price
-        data[data.length - 1] = currentPrice;
-        // Fill gaps with nearest known value
-        for (let i = data.length - 2; i >= 0; i--) {
-          if (data[i] === null) data[i] = data[i + 1];
-        }
-
-        const actualCount = parsed.prices.length;
-        console.log(`[chart] Historical prices extracted: ${actualCount}/${count} days from web`);
-        return { labels, data };
-      }
-    }
-  } catch (err) {
-    console.warn(`[chart] Bulk historical price fetch failed: ${err.message}`);
-  }
-
-  // Per-day fallback: search for each day individually
-  console.log(`[chart] Falling back to per-day price search`);
-  const data = new Array(count).fill(null);
-  data[data.length - 1] = currentPrice;
-
-  const pastDays = dates.slice(0, -1);
-  const BATCH_SIZE = 3;
-  for (let batch = 0; batch < pastDays.length; batch += BATCH_SIZE) {
-    const batchDays = pastDays.slice(batch, batch + BATCH_SIZE);
-    const results = await Promise.allSettled(batchDays.map(async (d, batchIdx) => {
-      const dateStr = d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-      const q = `${assetName} spot price on ${dateStr}`;
-      try {
-        const sr = await _webSearch(q);
-        for (const r of (sr.searchResults || [])) {
-          const snippet = (r.snippet || '') + ' ' + (r.title || '');
-          const price = _extractDollarPrice(snippet);
-          if (price !== null) {
-            console.log(`[chart] ${assetName} on ${dateStr}: $${price}`);
-            return { idx: batch + batchIdx, price };
+        // Build a date→price map from Yahoo data
+        const priceByDate = new Map();
+        for (let i = 0; i < timestamps.length; i++) {
+          if (closes[i] != null) {
+            const d = new Date(timestamps[i] * 1000);
+            const key = d.toISOString().split('T')[0];
+            priceByDate.set(key, parseFloat(closes[i].toFixed(2)));
           }
         }
-      } catch {}
-      return { idx: batch + batchIdx, price: null };
-    }));
 
-    for (const r of results) {
-      if (r.status === 'fulfilled' && r.value.price !== null) {
-        data[r.value.idx] = r.value.price;
+        // Map our requested dates to Yahoo prices
+        const data = dates.map(d => {
+          const key = d.toISOString().split('T')[0];
+          if (priceByDate.has(key)) return priceByDate.get(key);
+          // Weekend/holiday: find nearest prior trading day
+          for (let offset = 1; offset <= 5; offset++) {
+            const prior = new Date(d);
+            prior.setDate(prior.getDate() - offset);
+            const priorKey = prior.toISOString().split('T')[0];
+            if (priceByDate.has(priorKey)) return priceByDate.get(priorKey);
+          }
+          return null;
+        });
+
+        // Fill any remaining nulls
+        for (let i = data.length - 1; i >= 0; i--) {
+          if (data[i] === null && i < data.length - 1) data[i] = data[i + 1];
+        }
+        for (let i = 0; i < data.length; i++) {
+          if (data[i] === null && i > 0) data[i] = data[i - 1];
+        }
+
+        const foundCount = data.filter(v => v !== null).length;
+        console.log(`[chart] Yahoo Finance: ${foundCount}/${count} prices for ${yahooSymbol}`);
+
+        if (foundCount > 0) return { labels, data };
       }
+    } catch (err) {
+      console.warn(`[chart] Yahoo Finance failed for ${yahooSymbol}: ${err.message}`);
     }
   }
 
-  // Fill remaining gaps
-  for (let i = data.length - 2; i >= 0; i--) {
-    if (data[i] === null) data[i] = data[i + 1];
-  }
-
-  const foundCount = data.filter(v => v !== null).length;
-  console.log(`[chart] Per-day search: found ${foundCount}/${count} prices`);
+  // Fallback: use live price for all days (flat line but honest)
+  console.log(`[chart] No historical API available for "${assetName}", using live price`);
+  const data = new Array(count).fill(currentPrice);
   return { labels, data };
-}
-
-/**
- * Extract a dollar price from text using string methods (no regex).
- * Scans for $ followed by digits and dots.
- */
-function _extractDollarPrice(text) {
-  let idx = 0;
-  while (idx < text.length) {
-    const dollarIdx = text.indexOf('$', idx);
-    if (dollarIdx === -1) break;
-    let numStr = '';
-    let j = dollarIdx + 1;
-    while (j < text.length) {
-      const ch = text[j];
-      if ((ch >= '0' && ch <= '9') || ch === '.') { numStr += ch; j++; }
-      else if (ch === ',') { j++; } // skip commas in numbers
-      else break;
-    }
-    if (numStr.length >= 2 && numStr.includes('.')) {
-      const val = parseFloat(numStr);
-      if (!isNaN(val) && val > 0) return val;
-    }
-    idx = dollarIdx + 1;
-  }
-  return null;
 }
 
 /**
