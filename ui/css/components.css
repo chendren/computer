@@ -3735,3 +3735,13 @@ body.alert-blue .lcars-sidebar { border-color: #3366CC; }
   color: #555;
   font-style: italic;
 }
+
+
+/* Captain's Log Analysis */
+.log-analysis { margin-top: 8px; padding: 8px 12px; background: rgba(153, 153, 255, 0.08); border-left: 2px solid #9999FF; }
+.log-analysis-summary { color: #CCCCCC; font-size: 13px; margin-bottom: 6px; font-style: italic; }
+.log-analysis-meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 4px; }
+.log-sentiment { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+.log-actions { margin-top: 8px; }
+.log-actions-title { color: #FF9900; font-size: 10px; letter-spacing: 2px; margin-bottom: 4px; }
+.log-action-item { color: #CC99CC; font-size: 12px; padding: 2px 0; padding-left: 8px; border-left: 1px solid #CC99CC; margin-bottom: 2px; }

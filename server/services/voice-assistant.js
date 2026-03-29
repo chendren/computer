@@ -92,16 +92,30 @@ export const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'create_log',
-      description: "Create a formal log entry. Use when user says 'log', 'captains log', 'captain\\'s log', 'log entry', 'record'.",
+      name: 'captains_log',
+      description: "Record a captain's log entry with automatic analysis and action detection. Use when user says 'log', 'captains log', 'captain\\'s log', 'log entry', 'record', 'dictate'. Analyzes the entry for sentiment, topics, and actionable items. Detected actions (email, calendar, reminders) are read back for confirmation before executing.",
       parameters: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: 'Log entry content' },
-          stardate: { type: 'string', description: 'Stardate if specified by user (e.g. "2387.2")' },
+          text: { type: 'string', description: 'Log entry content — freeform dictation' },
+          stardate: { type: 'string', description: 'Stardate if specified (e.g. "2387.2")' },
           category: { type: 'string', enum: ['personal', 'mission', 'technical', 'observation'], description: 'Log category (default: personal)' },
         },
         required: ['text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'confirm_actions',
+      description: 'Confirm or cancel pending actions from a captain\'s log entry. Use when user says "yes", "proceed", "go ahead", "make it so", "execute", "do it", "cancel", "no", "negative", "belay that" after being asked to confirm actions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          confirm: { type: 'boolean', description: 'true to execute pending actions, false to cancel' },
+        },
+        required: ['confirm'],
       },
     },
   },
@@ -1003,6 +1017,40 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     }
   }
 
+  // Safety net #0: captain's log — MUST be first. When the user says "captain's log",
+  // the entire utterance is a log entry. The log's own LLM analysis will detect actions
+  // (email, calendar, reminders) inside the entry. Other safety nets must NOT fire
+  // independently, or they'd steal the response with incomplete args.
+  // NOTE: Check the ORIGINAL userText, not resolvedText — pronoun resolution may inject
+  // "captain's log" from previous context into resolvedText, causing false matches.
+  const logKw = ["captain's log", 'captains log', 'log entry', 'dictate a log'];
+  const originalLower = userText.toLowerCase();
+  const isLogEntry = logKw.some(kw => originalLower.includes(kw));
+  if (isLogEntry) {
+    console.log(`[voice-ai] [action] Captain's log detected — exclusive routing`);
+    actionToolCalls = [{ name: 'captains_log', arguments: { text: userText } }];
+    // Skip all other safety nets — jump straight to tool execution
+  }
+
+  // Safety net #0b: confirm/cancel pending actions — also exclusive.
+  // Use originalLower to avoid pronoun-resolved context triggering false matches.
+  if (!isLogEntry && session._pendingActions && session._pendingActions.length > 0) {
+    const confirmKw = ['yes', 'proceed', 'go ahead', 'make it so', 'execute', 'do it', 'affirmative', 'engage'];
+    const cancelKw = ['no', 'cancel', 'negative', 'belay that', 'abort', 'stand down'];
+    const wantsConfirm = confirmKw.some(kw => originalLower.includes(kw));
+    const wantsCancel = cancelKw.some(kw => originalLower.includes(kw));
+    if (wantsConfirm || wantsCancel) {
+      console.log(`[voice-ai] [action] Forcing confirm_actions — ${wantsConfirm ? 'confirmed' : 'cancelled'}`);
+      const { _setPendingActions } = await import('./websocket.js');
+      if (_setPendingActions) _setPendingActions(session._pendingActions);
+      actionToolCalls = [{ name: 'confirm_actions', arguments: { confirm: wantsConfirm } }];
+      if (!wantsConfirm) session._pendingActions = [];
+    }
+  }
+
+  // All remaining safety nets are skipped when captain's log or confirm_actions is active
+  if (!isLogEntry && !actionToolCalls.some(tc => tc.name === 'confirm_actions')) {
+
   // Safety net #1: email tool routing.
   // The action model sometimes fails to select the correct email tool or selects none at all.
   // If the user's request contains email-related keywords but the model didn't pick
@@ -1183,6 +1231,10 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     console.log(`[voice-ai] [action] Forcing save_bookmark — user request contains bookmark keyword`);
     actionToolCalls.push({ name: 'save_bookmark', arguments: {} });
   }
+
+  // (captain's log + confirm_actions safety nets moved to top — see Safety net #0)
+
+  } // end of safety nets guard (skipped for captain's log + confirm)
 
   // Step 2: Execute action model-selected tools
   let loops = 0;
@@ -1745,6 +1797,51 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     session.messages.push({ role: 'user', content: enrichedText });
     session.messages.push({ role: 'assistant', content: spokenText });
     return { text: spokenText, toolsUsed, panelSwitch: 'knowledge' };
+  }
+
+  // captains_log shortcut — speak summary + proposed actions, store pending
+  const logResult = toolResults.find(tr => (tr.tool === 'captains_log' || tr.tool === 'create_log') && !tr.error);
+  if (logResult && logResult.result?.log) {
+    const a = logResult.result.analysis || {};
+    let spokenText = `Log recorded.`;
+    if (a.summary) spokenText += ` ${a.summary}.`;
+    if (a.sentiment && a.sentiment !== 'neutral') spokenText += ` Sentiment: ${a.sentiment}.`;
+    const actions = a.actions || [];
+    if (actions.length > 0) {
+      spokenText += ` I detected ${actions.length} action${actions.length > 1 ? 's' : ''}. `;
+      actions.forEach((act, i) => {
+        spokenText += `${i === 0 ? 'First' : i === 1 ? 'Second' : i === 2 ? 'Third' : 'Next'}: ${act.description}. `;
+      });
+      spokenText += 'Shall I proceed?';
+      // Store pending actions in session for confirm_actions
+      session._pendingActions = actions;
+    }
+    console.log(`[voice-ai] [captains-log-shortcut] Spoken: "${spokenText.slice(0, 200)}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch: 'log' };
+  }
+
+  // confirm_actions shortcut — execute or cancel pending actions
+  const confirmResult = toolResults.find(tr => tr.tool === 'confirm_actions' && !tr.error);
+  if (confirmResult && confirmResult.result) {
+    const r = confirmResult.result;
+    let spokenText;
+    if (r.executed) {
+      const successes = (r.results || []).filter(x => x.ok);
+      const failures = (r.results || []).filter(x => !x.ok);
+      spokenText = `Done. ${successes.length} action${successes.length !== 1 ? 's' : ''} executed.`;
+      for (const s of successes.slice(0, 3)) {
+        spokenText += ` ${s.description}.`;
+      }
+      if (failures.length > 0) spokenText += ` ${failures.length} failed.`;
+    } else {
+      spokenText = 'Actions cancelled.';
+    }
+    console.log(`[voice-ai] [confirm-shortcut] Spoken: "${spokenText}"`);
+    session.messages.push({ role: 'user', content: enrichedText });
+    session.messages.push({ role: 'assistant', content: spokenText });
+    return { text: spokenText, toolsUsed, panelSwitch };
   }
 
   // For all other tools, ask the response model to generate a spoken answer.

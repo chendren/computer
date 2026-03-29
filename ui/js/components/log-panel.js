@@ -114,6 +114,61 @@ export class LogPanel {
       entry.appendChild(tagsDiv);
     }
 
+    // Analysis section (from enhanced captain's log)
+    const analysis = data.analysis;
+    if (analysis) {
+      const analysisDiv = document.createElement('div');
+      analysisDiv.className = 'log-analysis';
+
+      if (analysis.summary) {
+        const sumDiv = document.createElement('div');
+        sumDiv.className = 'log-analysis-summary';
+        sumDiv.textContent = analysis.summary;
+        analysisDiv.appendChild(sumDiv);
+      }
+
+      const metaDiv = document.createElement('div');
+      metaDiv.className = 'log-analysis-meta';
+
+      if (analysis.sentiment) {
+        const sentSpan = document.createElement('span');
+        sentSpan.className = 'log-sentiment';
+        const sentColors = { positive: '#55CC55', negative: '#CC3333', neutral: '#9999FF' };
+        sentSpan.style.color = sentColors[analysis.sentiment] || '#9999FF';
+        sentSpan.textContent = analysis.sentiment;
+        metaDiv.appendChild(sentSpan);
+      }
+
+      if (analysis.topics && analysis.topics.length) {
+        analysis.topics.forEach((topic, i) => {
+          const topicSpan = document.createElement('span');
+          topicSpan.className = 'topic-tag';
+          topicSpan.style.background = getLcarsColor(i);
+          topicSpan.textContent = topic;
+          metaDiv.appendChild(topicSpan);
+        });
+      }
+      analysisDiv.appendChild(metaDiv);
+
+      if (analysis.actions && analysis.actions.length) {
+        const actDiv = document.createElement('div');
+        actDiv.className = 'log-actions';
+        const actTitle = document.createElement('div');
+        actTitle.className = 'log-actions-title';
+        actTitle.textContent = 'DETECTED ACTIONS';
+        actDiv.appendChild(actTitle);
+        analysis.actions.forEach(act => {
+          const actItem = document.createElement('div');
+          actItem.className = 'log-action-item';
+          actItem.textContent = act.description || act.tool;
+          actDiv.appendChild(actItem);
+        });
+        analysisDiv.appendChild(actDiv);
+      }
+
+      entry.appendChild(analysisDiv);
+    }
+
     this.container.insertBefore(entry, this.container.firstChild);
   }
 

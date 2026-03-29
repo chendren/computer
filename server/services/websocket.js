@@ -404,6 +404,10 @@ function _resolveYahooSymbol(assetName) {
 
 // ── Active timers ─────────────────────────────────────────
 const _activeTimers = new Map();
+
+// ── Pending captain's log actions (awaiting confirmation) ──
+let _pendingActions = [];
+export function _setPendingActions(actions) { _pendingActions = actions || []; }
 export { _activeTimers };
 
 // ── Weather code descriptions (WMO) ──────────────────────
@@ -1070,16 +1074,84 @@ function createToolExecutor(baseUrl, ws) {
         });
         return await res.json();
       }
-      case 'create_log': {
-        const logData = { text: input.text };
+      case 'create_log':
+      case 'captains_log': {
+        const logText = input.text || '';
+        const logData = { text: logText };
         if (input.stardate) logData.stardate = input.stardate;
         if (input.category) logData.category = input.category;
-        const res = await fetch(`${baseUrl}/api/logs`, {
-          method: 'POST',
-          headers: authHeaders(),
+
+        // Phase 1: Save the log entry
+        const logRes = await fetch(`${baseUrl}/api/logs`, {
+          method: 'POST', headers: authHeaders(),
           body: JSON.stringify(logData),
         });
-        return await res.json();
+        const savedLog = await logRes.json();
+
+        // Phase 2: Analyze for summary, sentiment, topics, and actionable items
+        let analysis = { summary: '', sentiment: 'neutral', topics: [], actions: [] };
+        try {
+          const analyzePrompt = `You are a JSON extraction engine. Parse this captain's log and return ONLY a JSON object. No explanation, no commentary, no markdown — just the JSON object.
+
+{"summary": "one sentence", "sentiment": "positive|negative|neutral", "topics": ["topic1"], "actions": [{"tool": "send_email", "args": {"to": "name", "subject": "subject", "body": "text"}, "description": "human readable description"}]}
+
+Available tools for actions:
+- send_email (args: to, subject, body)
+- create_event (args: summary, start_time)
+- create_reminder (args: message, delay_minutes)
+- save_note (args: text)
+
+If no actions found, use "actions": []
+
+Log entry: ${logText}`;
+
+          const llmRes = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: VOICE_MODEL, stream: false, temperature: 0, max_tokens: 500,
+              messages: [{ role: 'user', content: analyzePrompt }] }),
+          });
+          const llmData = await llmRes.json();
+          let content = (llmData.choices?.[0]?.message?.content || '').trim();
+          if (content.startsWith('```')) { content = content.slice(content.indexOf('\n') + 1); const last = content.lastIndexOf('```'); if (last !== -1) content = content.slice(0, last); }
+          analysis = JSON.parse(content.trim());
+          console.log(`[captains-log] Analysis: summary="${analysis.summary}", sentiment=${analysis.sentiment}, topics=[${(analysis.topics || []).join(', ')}], actions=${(analysis.actions || []).length}`);
+        } catch (err) {
+          console.warn(`[captains-log] Analysis failed: ${err.message}`);
+        }
+
+        // Update log entry with analysis data
+        try {
+          const updated = { ...savedLog, analysis };
+          await fetch(`${baseUrl}/api/logs`, {
+            method: 'POST', headers: authHeaders(),
+            body: JSON.stringify(updated),
+          });
+        } catch {}
+
+        return { log: savedLog, analysis };
+      }
+      case 'confirm_actions': {
+        // Retrieve pending actions from the tool executor's closure
+        // The session stores pending actions set by the captains_log shortcut
+        const confirm = input.confirm;
+        if (confirm && _pendingActions.length > 0) {
+          const results = [];
+          for (const action of _pendingActions) {
+            try {
+              console.log(`[captains-log] Executing: ${action.tool}(${JSON.stringify(action.args).slice(0, 100)})`);
+              const toolFn = createToolExecutor(baseUrl, ws);
+              const result = await toolFn(action.tool, action.args);
+              results.push({ tool: action.tool, description: action.description, result, ok: true });
+            } catch (err) {
+              results.push({ tool: action.tool, description: action.description, error: err.message, ok: false });
+            }
+          }
+          _pendingActions = [];
+          return { executed: true, results };
+        } else {
+          _pendingActions = [];
+          return { cancelled: true };
+        }
       }
       case 'save_note': {
         const noteText = input.text || '';
