@@ -27,7 +27,7 @@
  */
 
 const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';
-const VOICE_MODEL = process.env.VOICE_MODEL || 'qwen3.5:9b';
+const VOICE_MODEL = process.env.VOICE_MODEL || 'nemotron-3-nano:4b-q8_0';
 const ACTION_MODEL = process.env.ACTION_MODEL || 'llama3-groq-tool-use:8b';
 
 // Per-session conversation history
@@ -504,16 +504,6 @@ async function callResponseModel(messages, systemPrompt) {
     max_tokens: 200,
   };
 
-  // Qwen3.5 supports /no_think to suppress verbose thinking mode
-  if (VOICE_MODEL.startsWith('qwen3')) {
-    body.extra_body = { enable_thinking: false };
-    // Also prepend /no_think to the user message as a fallback
-    const lastMsg = body.messages[body.messages.length - 1];
-    if (lastMsg.role === 'user' && !lastMsg.content.includes('/no_think')) {
-      lastMsg.content = '/no_think\n' + lastMsg.content;
-    }
-  }
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 45000);
   const res = await fetch(`${OLLAMA_BASE}/v1/chat/completions`, {
@@ -530,22 +520,7 @@ async function callResponseModel(messages, systemPrompt) {
   }
 
   const data = await res.json();
-  let content = data.choices?.[0]?.message?.content || '';
-
-  // Strip <think>...</think> blocks if the model still produces them
-  let thinkStart = content.indexOf('<think>');
-  while (thinkStart !== -1) {
-    const thinkEnd = content.indexOf('</think>', thinkStart);
-    if (thinkEnd === -1) {
-      // Unclosed think tag — remove everything from <think> onward
-      content = content.slice(0, thinkStart);
-      break;
-    }
-    content = content.slice(0, thinkStart) + content.slice(thinkEnd + 8);
-    thinkStart = content.indexOf('<think>');
-  }
-
-  return content.trim();
+  return (data.choices?.[0]?.message?.content || '').trim();
 }
 
 /**

@@ -31,7 +31,7 @@ const router = Router();
  *   - moshi: current Moshi sidecar status (running, port, pid)
  */
 router.get('/status', async (req, res) => {
-  const voiceModel = process.env.VOICE_MODEL || 'qwen3.5:9b';
+  const voiceModel = process.env.VOICE_MODEL || 'nemotron-3-nano:4b-q8_0';
   const actionModel = process.env.ACTION_MODEL || 'llama3-groq-tool-use:8b';
   const moshi = getMoshiStatus();
   res.json({

@@ -144,8 +144,8 @@ export class VoiceAssistantUI {
     this.modeButton = document.createElement('button');
     this.modeButton.className = 'voice-mode-toggle';
     this.modeButton.title = 'Voice Mode: Computer (Voxtral STT → Kokoro TTS)';
-    this.modeButton.textContent = 'MOSHI';
-    this.modeButton.setAttribute('data-mode', 'moshi');
+    this.modeButton.textContent = 'CMD';
+    this.modeButton.setAttribute('data-mode', 'computer');
     this.modeButton.addEventListener('click', () => this._toggleMode());
 
     const titleBar = document.querySelector('.lcars-title-bar');
