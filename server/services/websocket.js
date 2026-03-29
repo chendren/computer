@@ -16,6 +16,7 @@
  */
 
 import { transcribeChunk } from './transcription.js';
+import { getSoundEffect } from './sound-effects.js';
 import { getAuthToken } from '../middleware/auth.js';
 import { processVoiceCommand, isVoiceAvailable, ensureVoiceChecked } from './voice-assistant.js';
 import { createMoshiBridge, isMoshiRunning, KIND_AUDIO } from './moshi.js';
@@ -1096,6 +1097,9 @@ function createToolExecutor(baseUrl, ws) {
       case 'set_alert': {
         const level = input.level || 'red';
         const reason = input.reason || '';
+        const alertSfxMap = { red: 'sfx-alert-red', yellow: 'sfx-alert-yellow', blue: 'sfx-alert-blue' };
+        const alertSfxUrl = getSoundEffect(alertSfxMap[level]);
+        if (alertSfxUrl) broadcast('play_sound', { url: alertSfxUrl });
         broadcast('alert_status', { level, reason, timestamp: new Date().toISOString() });
         broadcast('status', { message: `${level.toUpperCase()} ALERT${reason ? ': ' + reason : ''}`, speak: true });
         return { ok: true, level, reason };
@@ -1140,6 +1144,8 @@ function createToolExecutor(baseUrl, ws) {
         }
         const fireAt = new Date(Date.now() + delayMs);
         const reminderId = setTimeout(() => {
+          const reminderSfx = getSoundEffect('sfx-alert-blue');
+          if (reminderSfx) broadcast('play_sound', { url: reminderSfx });
           broadcast('status', { message: `REMINDER: ${input.message}`, speak: true });
           broadcast('alert_status', { level: 'blue', reason: input.message });
         }, delayMs);
@@ -1344,6 +1350,8 @@ function createToolExecutor(baseUrl, ws) {
         const timerHandle = setTimeout(async () => {
           _activeTimers.delete(timerId);
           const msg = label ? `Timer complete: ${label}` : 'Timer complete';
+          const timerSfx = getSoundEffect('sfx-alert-blue');
+          if (timerSfx) broadcast('play_sound', { url: timerSfx });
           broadcast('alert_status', { level: 'blue', reason: msg });
           broadcast('status', { message: msg });
           try { await fetch(`${baseUrl}/api/tts/speak`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text: msg }) }); } catch {}
@@ -1491,6 +1499,16 @@ function createToolExecutor(baseUrl, ws) {
           return await calendar.createEvent({ summary: input.summary, startTime: input.start_time, durationMinutes: input.duration_minutes || 60, description: input.description });
         } catch (err) { return { error: 'Calendar not connected. ' + err.message }; }
       }
+      case 'analyze_document': {
+        const res = await fetch(`${baseUrl}/api/documents/analyze`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ path: input.path || '' }),
+        });
+        const result = await res.json();
+        if (result.error) return result;
+        return { summary: result.summary, topics: result.topics, actionItems: result.actionItems, title: result.title };
+      }
       default:
         return { error: `Unknown tool: ${toolName}` };
     }
@@ -1553,6 +1571,10 @@ async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
   console.log(`[ws] handleVoiceCommand: sessionId=${sessionId}, text="${text}"`);
   try {
     sendTo(ws, 'voice_thinking', {});
+
+    // Play acknowledge sound on wake word detection
+    const ackUrl = getSoundEffect('sfx-acknowledge');
+    if (ackUrl) sendTo(ws, 'play_sound', { url: ackUrl });
 
     const toolExecutor = createToolExecutor(baseUrl, ws);
     const result = await processVoiceCommand(sessionId, text, toolExecutor);
@@ -1640,6 +1662,8 @@ async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
     });
   } catch (err) {
     console.error(`[ws] handleVoiceCommand ERROR:`, err);
+    const errUrl = getSoundEffect('sfx-error');
+    if (errUrl) sendTo(ws, 'play_sound', { url: errUrl });
     sendTo(ws, 'voice_error', { error: err.message || 'Voice processing failed' });
   } finally {
     sendTo(ws, 'voice_done', {});

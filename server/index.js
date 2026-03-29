@@ -61,6 +61,7 @@ import * as gmail from './services/gmail.js';
 import { startMoshi, stopMoshi, getMoshiStatus } from './services/moshi.js';
 import { startVoxtralSTT, stopVoxtralSTT, getVoxtralSTTStatus } from './services/voxtral-stt.js';
 import { initMonitorPoller } from './services/monitor-poller.js';
+import { initSoundEffects } from './services/sound-effects.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(__dirname, '..');
@@ -136,6 +137,9 @@ await initAgents(PLUGIN_ROOT);
 await initCron(PLUGIN_ROOT, broadcast);
 await initMonitorPoller(PLUGIN_ROOT, broadcast);
 console.log('[computer] Local services initialized');
+
+// Pre-generate sound effect WAVs (non-blocking, uses Kokoro TTS)
+initSoundEffects().catch(err => console.error('[computer] SFX init failed:', err.message));
 
 // Start Voxtral STT sidecar (non-fatal, model loads in background)
 startVoxtralSTT(PLUGIN_ROOT).then(ok => {

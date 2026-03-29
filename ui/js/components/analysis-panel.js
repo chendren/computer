@@ -9,6 +9,12 @@ export class AnalysisPanel {
     this.submitBtn = document.getElementById('analysis-submit-btn');
     this.statusEl = document.getElementById('analysis-status');
 
+    // Document upload elements
+    this.uploadZone = document.getElementById('doc-upload-zone');
+    this.uploadInput = document.getElementById('doc-upload-input');
+    this.uploadLabel = document.getElementById('doc-upload-label');
+    this.uploadStatus = document.getElementById('doc-upload-status');
+
     if (this.submitBtn) {
       this.submitBtn.addEventListener('click', () => this.submitAnalysis());
     }
@@ -19,6 +25,76 @@ export class AnalysisPanel {
         }
       });
     }
+
+    this._initDocUpload();
+  }
+
+  _initDocUpload() {
+    if (!this.uploadZone || !this.uploadInput) return;
+
+    this.uploadZone.addEventListener('click', () => this.uploadInput.click());
+
+    this.uploadInput.addEventListener('change', () => {
+      if (this.uploadInput.files && this.uploadInput.files.length > 0) {
+        this._uploadFile(this.uploadInput.files[0]);
+      }
+    });
+
+    this.uploadZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      this.uploadZone.classList.add('drag-over');
+    });
+
+    this.uploadZone.addEventListener('dragleave', () => {
+      this.uploadZone.classList.remove('drag-over');
+    });
+
+    this.uploadZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      this.uploadZone.classList.remove('drag-over');
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        this._uploadFile(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  async _uploadFile(file) {
+    this.uploadZone.classList.add('uploading');
+    this.uploadLabel.textContent = 'Analyzing: ' + file.name;
+    const loadingSpan = document.createElement('span');
+    loadingSpan.className = 'lcars-loading';
+    this.uploadStatus.textContent = '';
+    this.uploadStatus.appendChild(loadingSpan);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const baseUrl = this.api.baseUrl || '/api';
+      const token = this.api.authToken || '';
+      const headers = {};
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+
+      const res = await fetch(baseUrl + '/documents/analyze', {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        this.uploadStatus.textContent = 'Error: ' + (data.error || 'Failed');
+      } else {
+        this.uploadStatus.textContent = 'Complete';
+      }
+    } catch (err) {
+      this.uploadStatus.textContent = 'Error: ' + (err.message || 'Upload failed');
+    }
+
+    this.uploadZone.classList.remove('uploading');
+    this.uploadLabel.textContent = 'Drop document here or click to upload (.txt, .md, .csv, .json, .html, .pdf)';
+    this.uploadInput.value = '';
+    setTimeout(() => { if (this.uploadStatus) this.uploadStatus.textContent = ''; }, 4000);
   }
 
   async submitAnalysis() {

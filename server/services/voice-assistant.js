@@ -560,6 +560,19 @@ export const TOOLS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'analyze_document',
+      description: 'Analyze a document or file. Use when user says "analyze this document", "summarize this file", "what does this document say", "review this report", "analyze the uploaded file", "analyze the document", "read this file".',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'File path to analyze (optional — uses last uploaded file if not specified)' },
+        },
+      },
+    },
+  },
 ];
 
 // In-memory reminders (broadcast when due)
@@ -567,6 +580,33 @@ const _reminders = [];
 
 const MAX_TOOL_LOOPS = 10;
 
+/**
+ * Split a chained voice command into individual sub-commands.
+ * Splits on explicit chain delimiters like "then", "and then", "after that", etc.
+ * Does NOT split on bare "and" — that's too ambiguous ("gold and silver" is one query).
+ */
+function splitChainedCommands(text) {
+  const delimiters = [', and then ', '. and then ', ' and then ', ', then ', '. then ', ' then ', ', after that ', ' after that ', ', followed by ', ' followed by ', ', and also ', ' and also '];
+  let parts = [text];
+  for (const delim of delimiters) {
+    const newParts = [];
+    for (const part of parts) {
+      const lower = part.toLowerCase();
+      const idx = lower.indexOf(delim);
+      if (idx !== -1) {
+        newParts.push(part.slice(0, idx).trim());
+        newParts.push(part.slice(idx + delim.length).trim());
+      } else {
+        newParts.push(part);
+      }
+    }
+    parts = newParts;
+  }
+  return parts.filter(p => p.length > 0);
+}
+
+// Chain words to detect multi-step voice commands
+const CHAIN_WORDS = [' then ', ' and then ', ' after that ', ' followed by ', ' and also '];
 
 
 /**
@@ -708,6 +748,20 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
     }
   }
 
+  // Chain detection: detect multi-step commands ("search for X, then chart it")
+  // Split into sub-commands and route each through the action model independently.
+  // Uses original userText (not resolvedText which has appended context annotations).
+  const lowerUserText = userText.toLowerCase();
+  const hasChain = CHAIN_WORDS.some(w => lowerUserText.includes(w));
+  let chainedSubCommands = null;
+  if (hasChain) {
+    const subCommands = splitChainedCommands(userText);
+    if (subCommands.length > 1) {
+      chainedSubCommands = subCommands;
+      console.log('[voice-ai] Chain detected: ' + subCommands.length + ' sub-commands: ' + subCommands.join(' | '));
+    }
+  }
+
   // Auto-search: detect queries that need current data not in the model's training.
   // If these keywords appear, proactively fetch web results and inject the facts
   // into the prompt BEFORE calling the action model. This way the model has real data to
@@ -816,13 +870,30 @@ export async function processVoiceCommand(sessionId, userText, toolExecutor) {
   }
 
   // Step 1: Ask action model what tools to call (tool routing)
-  console.log(`[voice-ai] [action] Routing: "${resolvedText}"`);
   let actionToolCalls = [];
-  try {
-    actionToolCalls = await callActionModel(resolvedText, session.messages.slice(-4));
-    console.log(`[voice-ai] [action] Selected ${actionToolCalls.length} tool(s): ${actionToolCalls.map(t => t.name).join(', ') || 'none'}`);
-  } catch (err) {
-    console.warn(`[voice-ai] [action] Routing failed, falling back to no tools: ${err.message}`);
+
+  if (chainedSubCommands) {
+    // Multi-step chain: route each sub-command through the action model independently
+    console.log(`[voice-ai] [action] Chain routing ${chainedSubCommands.length} sub-commands`);
+    for (const sub of chainedSubCommands) {
+      try {
+        const subCalls = await callActionModel(sub, session.messages.slice(-4));
+        console.log(`[voice-ai] [action] Sub-command "${sub}" -> ${subCalls.length} tool(s): ${subCalls.map(t => t.name).join(', ') || 'none'}`);
+        actionToolCalls.push(...subCalls);
+      } catch (err) {
+        console.warn(`[voice-ai] [action] Sub-command "${sub}" routing failed: ${err.message}`);
+      }
+    }
+    console.log(`[voice-ai] [action] Chain total: ${actionToolCalls.length} tool(s): ${actionToolCalls.map(t => t.name).join(', ')}`);
+  } else {
+    // Single command: normal routing
+    console.log(`[voice-ai] [action] Routing: "${resolvedText}"`);
+    try {
+      actionToolCalls = await callActionModel(resolvedText, session.messages.slice(-4));
+      console.log(`[voice-ai] [action] Selected ${actionToolCalls.length} tool(s): ${actionToolCalls.map(t => t.name).join(', ') || 'none'}`);
+    } catch (err) {
+      console.warn(`[voice-ai] [action] Routing failed, falling back to no tools: ${err.message}`);
+    }
   }
 
   // Safety net #1: email tool routing.

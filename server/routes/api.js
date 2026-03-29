@@ -1,11 +1,33 @@
 import { Router } from 'express';
 import os from 'os';
+import path from 'path';
+import fs from 'fs/promises';
+import multer from 'multer';
 import { transcripts, analyses, sessions, logs, monitors, comparisons } from '../services/storage.js';
 import { broadcast, _activeTimers } from '../services/websocket.js';
 import { notify, notifyAlert, notifyComplete } from '../services/notifications.js';
 import * as gmail from '../services/gmail.js';
 import * as gmailIntel from '../services/gmail-intelligence.js';
 import * as calendar from '../services/calendar.js';
+
+// Document upload storage — reuse same temp dir pattern as transcribe.js
+const docUpload = multer({
+  dest: path.join(os.tmpdir(), 'computer-uploads'),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowed = ['.txt', '.md', '.csv', '.json', '.html', '.pdf', '.docx'];
+    if (allowed.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Unsupported file type. Accepted: .txt, .md, .csv, .json, .html, .pdf'));
+    }
+  },
+});
+
+// Track last uploaded document for voice reference
+let _lastUploadedDoc = null;
+export function getLastUploadedDoc() { return _lastUploadedDoc; }
 
 const OLLAMA_BASE = process.env.OLLAMA_URL || 'http://localhost:11434';
 const VOICE_MODEL = process.env.VOICE_MODEL || 'llama4:scout';
@@ -1392,6 +1414,123 @@ router.get('/timers', (req, res) => {
     });
   }
   res.json({ timers, count: timers.length });
+});
+
+// ── Document Analysis ──────────────────────────────────────
+
+/**
+ * Extract text from a file path based on extension.
+ * - .txt, .md, .csv, .json, .html: read as UTF-8
+ * - .pdf: use pdftotext (poppler) if available, otherwise raw text extraction
+ */
+async function extractDocumentText(filePath, originalName) {
+  const ext = path.extname(originalName || filePath).toLowerCase();
+
+  if (['.txt', '.md', '.csv', '.json', '.html'].includes(ext)) {
+    return await fs.readFile(filePath, 'utf-8');
+  }
+
+  if (ext === '.pdf') {
+    // Try pdftotext from poppler (brew install poppler on macOS)
+    // Uses execFileSync with array args to avoid shell injection
+    try {
+      const { execFileSync } = await import('child_process');
+      const text = execFileSync('pdftotext', [filePath, '-'], {
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 30000,
+      });
+      if (text && text.trim().length > 0) return text;
+    } catch {
+      // pdftotext not available — fall through
+    }
+    // Fallback: read as binary and try to extract embedded text strings
+    const buf = await fs.readFile(filePath);
+    const raw = buf.toString('utf-8');
+    let extracted = '';
+    let i = 0;
+    while (i < raw.length) {
+      if (raw[i] === '(' && i > 0) {
+        let depth = 1;
+        let text = '';
+        i++;
+        while (i < raw.length && depth > 0) {
+          if (raw[i] === '\\') { i += 2; continue; }
+          if (raw[i] === '(') depth++;
+          else if (raw[i] === ')') { depth--; if (depth === 0) break; }
+          const code = raw.charCodeAt(i);
+          if (code >= 32 && code <= 126) text += raw[i];
+          i++;
+        }
+        if (text.length > 2) extracted += text + ' ';
+      }
+      i++;
+    }
+    if (extracted.trim().length > 50) return extracted.trim();
+    return '[PDF text extraction failed — install poppler: brew install poppler]';
+  }
+
+  return await fs.readFile(filePath, 'utf-8');
+}
+
+router.post('/documents/analyze', docUpload.single('file'), async (req, res) => {
+  let filePath = null;
+  let originalName = 'document';
+  let shouldCleanup = false;
+
+  try {
+    if (req.file) {
+      filePath = req.file.path;
+      originalName = req.file.originalname;
+      shouldCleanup = true;
+    } else if (req.body && req.body.path && req.body.path.length > 0) {
+      filePath = req.body.path;
+      originalName = path.basename(filePath);
+    } else if (_lastUploadedDoc) {
+      filePath = _lastUploadedDoc.path;
+      originalName = _lastUploadedDoc.name;
+    } else {
+      return res.status(400).json({ error: 'No file uploaded, no path provided, and no previous document on record' });
+    }
+
+    // Store as last uploaded doc for voice reference
+    _lastUploadedDoc = { path: filePath, name: originalName, timestamp: new Date().toISOString() };
+    if (shouldCleanup) {
+      // Copy to persistent location so voice can reference it later
+      const persistDir = path.join(os.tmpdir(), 'computer-documents');
+      await fs.mkdir(persistDir, { recursive: true });
+      const persistPath = path.join(persistDir, originalName);
+      await fs.copyFile(filePath, persistPath);
+      _lastUploadedDoc.path = persistPath;
+    }
+
+    broadcast('status', { message: `Analyzing document: ${originalName}`, processing: true });
+
+    const text = await extractDocumentText(filePath, originalName);
+
+    if (!text || text.trim().length === 0) {
+      broadcast('status', { message: 'Document analysis failed — no text content', processing: false });
+      return res.status(400).json({ error: 'Could not extract text from document' });
+    }
+
+    const title = `Document: ${originalName}`;
+    const analysis = await runAnalysis(text, title);
+
+    const item = await analyses.save(analysis);
+    broadcast('analysis', item);
+    broadcast('voice_panel_switch', { panel: 'analysis' });
+    broadcast('status', { message: `Document analyzed: ${originalName}`, processing: false });
+
+    res.json(item);
+  } catch (err) {
+    console.error('[doc-analysis] Failed:', err.message);
+    broadcast('status', { message: 'Document analysis failed', processing: false });
+    res.status(500).json({ error: 'Document analysis failed: ' + err.message });
+  } finally {
+    if (shouldCleanup && filePath) {
+      await fs.unlink(filePath).catch(() => {});
+    }
+  }
 });
 
 export default router;

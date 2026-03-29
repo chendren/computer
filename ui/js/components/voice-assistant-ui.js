@@ -596,6 +596,11 @@ export class VoiceAssistantUI {
       }
     });
 
+    // Sound effect cue from server — queue and play immediately
+    this.ws.on('play_sound', (data) => {
+      if (data.url) this.audio.speak(data.url);
+    });
+
     this.ws.on('voice_panel_switch', (data) => {
       console.log('[VoiceUI] panel_switch:', data.panel);
       if (data.panel && window.computerApp) {

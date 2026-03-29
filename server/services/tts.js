@@ -113,6 +113,7 @@ export async function cleanupTTSFiles(maxAgeMs = 300000) {
     const files = await fs.readdir(TTS_OUTPUT_DIR);
     const now = Date.now();
     for (const file of files) {
+      if (file.startsWith('sfx-')) continue;
       const filePath = path.join(TTS_OUTPUT_DIR, file);
       const stat = await fs.stat(filePath);
       if (now - stat.mtimeMs > maxAgeMs) {

@@ -264,6 +264,35 @@
 
 /* (Analyze button removed — replaced by auto-markup) */
 
+/* ── Document Upload Zone ── */
+.doc-upload-zone {
+  border: 2px dashed var(--lcars-orange);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.doc-upload-zone:hover,
+.doc-upload-zone.drag-over {
+  border-color: var(--lcars-gold);
+  background: rgba(255, 153, 0, 0.08);
+}
+
+.doc-upload-zone.uploading {
+  border-color: var(--lcars-light-blue);
+  background: rgba(153, 204, 255, 0.06);
+}
+
+.doc-upload-label {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: var(--lcars-text-dim);
+  pointer-events: none;
+}
+
 /* ── Analysis Panel ── */
 .analysis-submit-form {
   display: flex;

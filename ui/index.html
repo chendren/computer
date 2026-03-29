@@ -105,6 +105,11 @@
 
       <!-- Analysis Panel -->
       <div id="panel-analysis" class="panel">
+        <div class="doc-upload-zone" id="doc-upload-zone">
+          <input type="file" id="doc-upload-input" accept=".txt,.md,.csv,.json,.html,.pdf" style="display:none">
+          <div class="doc-upload-label" id="doc-upload-label">Drop document here or click to upload (.txt, .md, .csv, .json, .html, .pdf)</div>
+          <span id="doc-upload-status" class="status-segment"></span>
+        </div>
         <div class="analysis-submit-form">
           <textarea id="analysis-input" class="analysis-textarea" placeholder="Paste or type text to analyze..." rows="4"></textarea>
           <div class="analysis-submit-row">

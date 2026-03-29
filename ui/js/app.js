@@ -113,6 +113,11 @@ class ComputerApp {
       if (!this._voiceLockPanel) this.switchPanel('knowledge');
     });
 
+    // Sound effect cue from server — play through AudioPlayer queue
+    this.ws.on('play_sound', (data) => {
+      if (data.url) this.audio.speak(data.url);
+    });
+
     // Alert status — visual overlay for red/yellow/blue alert
     this.ws.on('alert_status', (data) => {
       this._setAlertStatus(data.level, data.reason);
