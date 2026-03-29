@@ -113,6 +113,7 @@ export class VoiceAssistantUI {
     this._bindWsHandlers();     // handle all server → client events
     this._bindAudioCallbacks(); // connect audio playback end → state transition
     this._bindVadCallbacks();   // connect VAD speech events → recording flow
+    this._bindKeyboardShortcut(); // F5 or Space to toggle voice
   }
 
   /**
@@ -122,7 +123,7 @@ export class VoiceAssistantUI {
   _createButton() {
     this.button = document.createElement('button');
     this.button.className = 'voice-toggle';
-    this.button.title = 'Voice Assistant';
+    this.button.title = 'Voice Assistant (F5 or Space)';
     this.button.innerHTML = '&#9670;';  // Unicode diamond ♦ — the Star Trek computer symbol
     this.button.setAttribute('data-state', 'idle');
     this.button.addEventListener('click', () => this.toggle());
@@ -152,6 +153,23 @@ export class VoiceAssistantUI {
     if (titleBar) {
       titleBar.appendChild(this.modeButton);
     }
+  }
+
+  /**
+   * Bind keyboard shortcuts: F5 always toggles voice, Space toggles when not in a text input.
+   */
+  _bindKeyboardShortcut() {
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'F5') {
+        e.preventDefault();
+        this.toggle();
+        return;
+      }
+      if (e.key === ' ' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA' && !e.target.isContentEditable) {
+        e.preventDefault();
+        this.toggle();
+      }
+    });
   }
 
   /**

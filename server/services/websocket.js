@@ -1354,7 +1354,11 @@ function createToolExecutor(baseUrl, ws) {
           if (timerSfx) broadcast('play_sound', { url: timerSfx });
           broadcast('alert_status', { level: 'blue', reason: msg });
           broadcast('status', { message: msg });
-          try { await fetch(`${baseUrl}/api/tts/speak`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text: msg }) }); } catch {}
+          try {
+            const ttsRes = await fetch(`${baseUrl}/api/tts/speak`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ text: msg }) });
+            const ttsData = await ttsRes.json();
+            if (ttsData.audioUrl) broadcast('play_sound', { url: ttsData.audioUrl });
+          } catch {}
           setTimeout(() => broadcast('alert_status', { level: 'normal', reason: 'Timer acknowledged' }), 5000);
         }, secs * 1000);
         _activeTimers.set(timerId, { handle: timerHandle, label, endsAt: Date.now() + secs * 1000 });
@@ -1653,6 +1657,24 @@ async function handleVoiceCommand(ws, sessionId, text, baseUrl) {
         }
       }
     }
+
+    // Save voice interaction to transcript history
+    try {
+      await fetch(`${baseUrl}/api/transcripts`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          source: 'voice',
+          text: `User: ${text}\n\nComputer: ${result.text}`,
+          filename: 'voice-command',
+          language: 'en',
+          segments: [
+            { text: text, start: 0, end: 0, speaker: 'user' },
+            { text: result.text, start: 0, end: 0, speaker: 'computer' },
+          ],
+        }),
+      });
+    } catch {}
 
     sendTo(ws, 'voice_response', {
       text: result.text,
