@@ -3065,6 +3065,30 @@
   color: var(--lcars-orange);
 }
 
+.voice-always-on-toggle {
+  background: none;
+  border: 1px solid #9999FF;
+  color: #9999FF;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 6px;
+  letter-spacing: 1px;
+  transition: all 0.3s;
+}
+
+.voice-always-on-toggle:hover {
+  border-color: #FF9900;
+  color: #FF9900;
+}
+
+.voice-always-on-toggle[data-active="true"] {
+  border-color: #55CC55;
+  color: #55CC55;
+}
+
 /* ══════════════════════════════════════════════
    Alert System
    ══════════════════════════════════════════════ */
@@ -3638,4 +3662,76 @@ body.alert-blue .lcars-sidebar { border-color: #3366CC; }
   color: #9999FF;
   font-size: 12px;
   padding: 2px 0;
+}
+
+/* ── Quick Actions Bar ── */
+.quick-actions {
+  display: flex;
+  gap: 4px;
+  padding: 4px 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid #333;
+  flex-wrap: wrap;
+}
+.quick-action-btn {
+  background: rgba(153, 153, 255, 0.15);
+  border: 1px solid #666;
+  color: #9999FF;
+  font-family: 'Antonio', sans-serif;
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 4px 12px;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.quick-action-btn:hover {
+  background: rgba(255, 153, 0, 0.2);
+  border-color: #FF9900;
+  color: #FF9900;
+}
+.quick-action-btn:active {
+  background: rgba(255, 153, 0, 0.4);
+}
+/* Red alert button special styling */
+.quick-action-btn[data-cmd="red alert"] {
+  border-color: #CC3333;
+  color: #CC3333;
+}
+.quick-action-btn[data-cmd="red alert"]:hover {
+  background: rgba(204, 51, 51, 0.3);
+}
+
+/* ── Text Command Bar ── */
+.text-command-bar {
+  display: flex;
+  align-items: center;
+  padding: 6px 16px;
+  background: rgba(0, 0, 0, 0.5);
+  border-top: 1px solid #333;
+}
+.text-command-prefix {
+  color: #FF9900;
+  font-family: 'Antonio', sans-serif;
+  font-size: 14px;
+  letter-spacing: 1px;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+.text-command-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid #444;
+  color: #CCCCCC;
+  font-family: 'Antonio', sans-serif;
+  font-size: 14px;
+  padding: 6px 12px;
+  outline: none;
+}
+.text-command-input:focus {
+  border-color: #FF9900;
+  color: #FFFFFF;
+}
+.text-command-input::placeholder {
+  color: #555;
+  font-style: italic;
 }

@@ -157,6 +157,31 @@ class ComputerApp {
       }
     });
 
+    // Text command input — type commands instead of speaking
+    const cmdInput = document.getElementById('text-command-input');
+    if (cmdInput) {
+      cmdInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && cmdInput.value.trim().length > 0) {
+          const cmd = cmdInput.value.trim();
+          this.ws.send('voice_command', { text: cmd });
+          this.statusBar?.setActivity('Command: ' + cmd);
+          cmdInput.value = '';
+        }
+      });
+    }
+
+    // Quick action buttons — send voice commands via WebSocket
+    const quickActions = document.getElementById('quick-actions');
+    if (quickActions) {
+      quickActions.addEventListener('click', (e) => {
+        const btn = e.target.closest('.quick-action-btn');
+        if (btn && btn.dataset.cmd) {
+          this.ws.send('voice_command', { text: btn.dataset.cmd });
+          this.statusBar?.setActivity('Command: ' + btn.dataset.cmd);
+        }
+      });
+    }
+
     // Panel switching via sidebar buttons
     const buttons = document.querySelectorAll('.lcars-button[data-panel]');
     buttons.forEach(btn => {

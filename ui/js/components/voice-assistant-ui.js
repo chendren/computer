@@ -106,15 +106,24 @@ export class VoiceAssistantUI {
     this.openaiTranscript = ''; // Accumulates OpenAI Realtime text tokens
     this.novaTranscript = '';   // Accumulates Nova Sonic text tokens
 
+    // Always-listening mode: auto-activates voice on page load, persists via localStorage
+    this.alwaysListening = localStorage.getItem('lcars-always-listening') === 'true';
+
     console.log('[VoiceUI] Constructing');
 
     this._createButton();       // ♦ diamond toggle button in the LCARS title bar
     this._createModeToggle();   // MOSHI / CMD mode label button
+    this._createAlwaysOnToggle(); // AUTO / MANUAL toggle button
     this._createSuggestionsPanel(); // "Try saying..." overlay for discoverability
     this._bindWsHandlers();     // handle all server → client events
     this._bindAudioCallbacks(); // connect audio playback end → state transition
     this._bindVadCallbacks();   // connect VAD speech events → recording flow
     this._bindKeyboardShortcut(); // F5 or Space to toggle voice
+
+    // Auto-activate after WebSocket has time to connect
+    if (this.alwaysListening) {
+      setTimeout(() => this.activate(), 3000);
+    }
   }
 
   /**
@@ -153,6 +162,32 @@ export class VoiceAssistantUI {
     const titleBar = document.querySelector('.lcars-title-bar');
     if (titleBar) {
       titleBar.appendChild(this.modeButton);
+    }
+  }
+
+  /**
+   * Create the AUTO / MANUAL toggle button for always-listening mode.
+   * When AUTO is active, voice activates on page load and re-activates after each command.
+   */
+  _createAlwaysOnToggle() {
+    this.alwaysOnBtn = document.createElement('button');
+    this.alwaysOnBtn.className = 'voice-always-on-toggle';
+    this.alwaysOnBtn.textContent = this.alwaysListening ? 'AUTO' : 'MANUAL';
+    this.alwaysOnBtn.title = 'Toggle always-listening mode';
+    this.alwaysOnBtn.setAttribute('data-active', this.alwaysListening.toString());
+    this.alwaysOnBtn.addEventListener('click', () => {
+      this.alwaysListening = !this.alwaysListening;
+      localStorage.setItem('lcars-always-listening', this.alwaysListening.toString());
+      this.alwaysOnBtn.textContent = this.alwaysListening ? 'AUTO' : 'MANUAL';
+      this.alwaysOnBtn.setAttribute('data-active', this.alwaysListening.toString());
+      if (this.alwaysListening && this.state === STATES.IDLE) {
+        this.activate();
+      }
+    });
+
+    const titleBar = document.querySelector('.lcars-title-bar');
+    if (titleBar) {
+      titleBar.appendChild(this.alwaysOnBtn);
     }
   }
 
