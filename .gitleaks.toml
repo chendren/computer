@@ -1,0 +1,17 @@
+title = "Default gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow known false positives in docs and tests"
+paths = [
+  '''(?:^|/)docs/''',
+  '''(?:^|/)src/docs/''',
+  '''\.secrets\.baseline$''',
+  '''(?:^|/).*\.test\.[jt]sx?$''',
+  '''(?:^|/).*\.fuzz\.test\.[jt]sx?$''',
+]
+regexes = [
+  '''MattermostWebSocketFactory''',
+]
