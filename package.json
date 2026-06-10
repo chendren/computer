@@ -12,7 +12,7 @@
     "@aws-sdk/client-bedrock-runtime": "^3.1019.0",
     "@google/genai": "^1.46.0",
     "@lancedb/lancedb": "^0.26.2",
-    "@ricky0123/vad-web": "^0.0.19",
+    "@ricky0123/vad-web": "^0.0.30",
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "express-rate-limit": "^8.2.1",
