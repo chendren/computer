@@ -14,7 +14,7 @@
     "@lancedb/lancedb": "^0.30.0",
     "@ricky0123/vad-web": "^0.0.30",
     "cors": "^2.8.5",
-    "express": "^4.21.0",
+    "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
     "googleapis": "^171.4.0",
     "helmet": "^8.1.0",
