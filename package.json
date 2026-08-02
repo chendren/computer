@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1019.0",
-    "@google/genai": "^1.46.0",
+    "@google/genai": "^2.8.0",
     "@lancedb/lancedb": "^0.30.0",
     "@ricky0123/vad-web": "^0.0.30",
     "cors": "^2.8.5",
